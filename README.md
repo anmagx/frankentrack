@@ -1,11 +1,11 @@
-# Acceltrack
+# Frankentrack
 
 A hobbyist 5DOF headtracking solution written in python, utilizing an IMU like the MPU6500/6050. Supports single IR-LED tracking for X/Y translation.
 
 
-## What is Acceltrack? 
+## What is Frankentrack? 
 
-Acceltrack is a headtracking solution for racing or flightsim games. It accepts motion sensor input over serial and sends them over UDP (opentrack-compatible). It also supports single brightspot tracking utilizing a webcam for providing X/Y translation. 
+Frankentrack is a headtracking solution for racing or flightsim games. It accepts motion sensor input over serial and sends them over UDP (opentrack-compatible). It also supports single brightspot tracking utilizing a webcam for providing X/Y translation. 
 
 ## Requirements
 
