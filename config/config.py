@@ -1,0 +1,94 @@
+"""
+System-wide configuration constants for acceltrack.
+
+These are DEFAULT values used for initialization. Many can be overridden
+at runtime via GUI controls and saved to config.cfg as user preferences.
+
+Do NOT store runtime state here - this module only defines initial defaults.
+"""
+
+# ============================================================================
+# Serial Communication
+# ============================================================================
+DEFAULT_SERIAL_PORT = 'COM3'
+DEFAULT_SERIAL_BAUD = 115200
+SERIAL_RETRY_DELAY = 2.0  # seconds between connection attempts
+SERIAL_TIMEOUT = 1.0  # seconds
+
+# ============================================================================
+# Queue Configuration
+# ============================================================================
+QUEUE_SIZE_DATA = 100  # For data pipelines (serial, euler, translation)
+QUEUE_SIZE_DISPLAY = 30  # For display-only queues
+QUEUE_SIZE_CONTROL = 10  # For control command queues
+QUEUE_SIZE_PREVIEW = 2  # For camera preview (intentionally small)
+
+# ============================================================================
+# Timeout Values
+# ============================================================================
+QUEUE_PUT_TIMEOUT = 0.1  # seconds
+QUEUE_GET_TIMEOUT = 0.5  # seconds
+WORKER_JOIN_TIMEOUT = 2.0  # seconds to wait for worker shutdown
+STALE_DETECTION_TIMEOUT = 2.0  # seconds before considering detection stale
+
+# ============================================================================
+# Fusion / Complementary Filter
+# ============================================================================
+ACCEL_THRESHOLD = 0.15  # g-units: threshold for stationary detection
+DEFAULT_CENTER_THRESHOLD = 5.0  # degrees: threshold for "near center" detection
+ALPHA_YAW = 0.98  # Complementary filter alpha for yaw
+ALPHA_DRIFT_CORRECTION = 0.99  # Alpha for drift correction when stationary
+
+# Time delta validation
+DT_MIN = 0.001  # seconds: reject dt smaller than this (likely duplicate)
+DT_MAX = 0.1  # seconds: reject dt larger than this (likely gap/reset)
+
+# ============================================================================
+# Camera / Computer Vision
+# ============================================================================
+DEFAULT_CAMERA_INDEX = 0
+DEFAULT_CAMERA_FPS = 30
+DEFAULT_CAMERA_WIDTH = 640
+DEFAULT_CAMERA_HEIGHT = 480
+
+# Detection thresholds
+DEFAULT_DETECTION_THRESHOLD = 220  # 0-255 brightness threshold
+MIN_BLOB_AREA = 6  # pixels: minimum contour area to consider
+
+# Preview settings
+PREVIEW_WIDTH = 320
+PREVIEW_HEIGHT = 240
+JPEG_QUALITY = 60  # 0-100
+
+# Position smoothing
+LOWPASS_ALPHA = 0.18  # smoothing factor for position tracking
+
+# Position output clamping
+POSITION_CLAMP_MIN = -30.0  # cm or arbitrary units
+POSITION_CLAMP_MAX = 30.0
+
+# ============================================================================
+# Network / UDP
+# ============================================================================
+DEFAULT_UDP_IP = '127.0.0.1'
+DEFAULT_UDP_PORT = 4243
+
+# ============================================================================
+# GUI / Display
+# ============================================================================
+GUI_POLL_INTERVAL_MS = 100  # milliseconds
+MAX_TEXT_BUFFER_LINES = 500  # lines to keep in message/serial displays
+FPS_REPORT_INTERVAL = 1.0  # seconds between FPS updates
+THRESH_DEBOUNCE_MS = 150  # milliseconds to debounce threshold slider
+
+# ============================================================================
+# Logging
+# ============================================================================
+LOG_FILE_NAME = 'acceltrack.log'
+LOG_FILE_MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+LOG_QUEUE_TIMEOUT = 0.5  # seconds
+
+# ============================================================================
+# Preferences File
+# ============================================================================
+PREFS_FILE_NAME = 'config.cfg'
