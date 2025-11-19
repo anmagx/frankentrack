@@ -75,6 +75,8 @@ class CameraPanel(ttk.LabelFrame):
             bg='black'
         )
         self.preview_canvas.pack()
+        # Draw default disabled message until preview enabled
+        self._draw_preview_disabled()
         
         # Controls frame below canvas
         controls_frame = ttk.Frame(self)
@@ -124,7 +126,7 @@ class CameraPanel(ttk.LabelFrame):
         self.fps_cb = ttk.Combobox(
             row3,
             textvariable=self.fps_var,
-            values=['15', '30', '60', '120'],
+            values=['15', '30', '60', '90', '120'],
             state="readonly",
             width=6
         )
@@ -193,8 +195,8 @@ class CameraPanel(ttk.LabelFrame):
                 timeout=QUEUE_PUT_TIMEOUT
             )
             # Clear canvas when preview disabled
-            self.preview_canvas.delete("all")
             self._current_preview_image = None
+            self._draw_preview_disabled()
             self._log_message("Preview disabled")
     
     def toggle_position_tracking(self):
@@ -253,10 +255,37 @@ class CameraPanel(ttk.LabelFrame):
             
             # Update canvas
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_image(0, 0, anchor="nw", image=photo)
+            # center the image on canvas if sizes differ
+            try:
+                cw = int(self.preview_canvas.cget('width'))
+                ch = int(self.preview_canvas.cget('height'))
+            except Exception:
+                cw = PREVIEW_WIDTH
+                ch = PREVIEW_HEIGHT
+            iw = photo.width()
+            ih = photo.height()
+            x = max((cw - iw) // 2, 0)
+            y = max((ch - ih) // 2, 0)
+            self.preview_canvas.create_image(x, y, anchor="nw", image=photo)
         except Exception as e:
             # Don't spam errors for preview updates
             pass
+
+    def _draw_preview_disabled(self):
+        """Draw a black background with centered 'Preview disabled' text."""
+        try:
+            self.preview_canvas.delete("all")
+            w = int(self.preview_canvas.cget('width'))
+            h = int(self.preview_canvas.cget('height'))
+            self.preview_canvas.create_rectangle(0, 0, w, h, fill='black', outline='black')
+            self.preview_canvas.create_text(w/2, h/2, text="Preview disabled", fill='white', font=('TkDefaultFont', 14))
+        except Exception:
+            try:
+                # Best-effort fallback
+                self.preview_canvas.delete("all")
+                self.preview_canvas.create_text(10, 10, text="Preview disabled", fill='white')
+            except Exception:
+                pass
     
     def set_cameras(self, camera_list: list):
         """Update the list of available cameras.

@@ -36,12 +36,28 @@ STALE_DETECTION_TIMEOUT = 2.0  # seconds before considering detection stale
 # ============================================================================
 ACCEL_THRESHOLD = 0.15  # g-units: threshold for stationary detection
 DEFAULT_CENTER_THRESHOLD = 5.0  # degrees: threshold for "near center" detection
-ALPHA_YAW = 0.98  # Complementary filter alpha for yaw
+ALPHA_YAW = 0.98   # Complementary filter alpha for yaw
+ALPHA_ROLL = 0.98  # Complementary filter alpha for roll
+ALPHA_PITCH = 0.99 # Complementary filter alpha for pitch
 ALPHA_DRIFT_CORRECTION = 0.99  # Alpha for drift correction when stationary
 
 # Time delta validation
 DT_MIN = 0.001  # seconds: reject dt smaller than this (likely duplicate)
 DT_MAX = 0.1  # seconds: reject dt larger than this (likely gap/reset)
+
+# Stationarity detection
+# Gyro magnitude threshold (deg/s) below which we consider the device "quiet"
+STATIONARY_GYRO_THRESHOLD = 5.0
+# Debounce time (seconds) the stationary condition must persist before
+# declaring the device stationary (prevents jitter/false positives)
+STATIONARY_DEBOUNCE_S = 0.15
+
+# ============================================================================
+# Gyro bias calibration
+# ============================================================================
+# Number of gyro gz samples to collect at startup for initial bias calibration.
+# Set to 0 to disable startup calibration and rely solely on online estimator.
+GYRO_BIAS_CAL_SAMPLES = 200
 
 # ============================================================================
 # Camera / Computer Vision
@@ -50,6 +66,8 @@ DEFAULT_CAMERA_INDEX = 0
 DEFAULT_CAMERA_FPS = 30
 DEFAULT_CAMERA_WIDTH = 640
 DEFAULT_CAMERA_HEIGHT = 480
+CAMERA_LOOP_DELAY = 0.02  # seconds between frame captures
+CAPTURE_RETRY_DELAY = 0.05  # seconds between camera open attempts
 
 # Detection thresholds
 DEFAULT_DETECTION_THRESHOLD = 220  # 0-255 brightness threshold

@@ -53,6 +53,11 @@ class ProcessHandler:
         ## Start log writer thread
         self.log_thread = threading.Thread(target=self._log_writer, daemon=True)
         self.log_thread.start()
+        
+        # Shutdown lock to prevent race conditions when stopping workers
+        # (e.g., signal handler vs. explicit shutdown)
+        self._shutdown_lock = threading.Lock()
+        self._stopping = False
     
     def _log_writer(self):
         """Background thread that writes log messages to file."""
@@ -93,6 +98,7 @@ class ProcessHandler:
     def _signal_handler(self, signum, frame):
         """Handle Ctrl+C and termination signals"""
         print("\n[ProcessHandler] Shutdown signal received, stopping workers...")
+        # Let stop_workers handle re-entrancy via the shutdown lock
         self.stop_workers()
         sys.exit(0)
     
@@ -167,19 +173,50 @@ class ProcessHandler:
         
     def stop_workers(self):
         """Stop all worker processes"""
-        print("[ProcessHandler] Stopping workers...")
-        
-        self.stop_event.set()
-        time.sleep(0.5)     
-        
-        for worker in self.workers:
-            if worker.is_alive():
-                worker.terminate()
-                
-        for worker in self.workers:
-            worker.join(timeout=WORKER_JOIN_TIMEOUT)  # Use constant
-            if worker.is_alive():
-                print(f"[ProcessHandler] Warning: Worker {worker.name} did not terminate in time.")
-                worker.kill()
-        
-        print("[ProcessHandler] All workers stopped.")
+        # Prevent concurrent shutdown attempts
+        acquired = self._shutdown_lock.acquire(blocking=False)
+        if not acquired:
+            print("[ProcessHandler] stop_workers already in progress, skipping duplicate call.")
+            return
+
+        try:
+            if self._stopping:
+                print("[ProcessHandler] stop already in progress, skipping.")
+                return
+
+            self._stopping = True
+            print("[ProcessHandler] Stopping workers...")
+
+            # Signal workers to stop
+            self.stop_event.set()
+            time.sleep(0.5)
+
+            # Terminate any remaining alive processes
+            for worker in self.workers:
+                try:
+                    if worker.is_alive():
+                        worker.terminate()
+                except Exception:
+                    pass
+
+            # Join with timeout and force-kill if necessary
+            for worker in self.workers:
+                try:
+                    worker.join(timeout=WORKER_JOIN_TIMEOUT)  # Use constant
+                    if worker.is_alive():
+                        print(f"[ProcessHandler] Warning: Worker {worker.name} did not terminate in time.")
+                        try:
+                            worker.kill()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            print("[ProcessHandler] All workers stopped.")
+        finally:
+            self._stopping = False
+            try:
+                self._shutdown_lock.release()
+            except RuntimeError:
+                # lock wasn't acquired or already released
+                pass

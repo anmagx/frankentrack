@@ -27,6 +27,8 @@ class StatusBar(ttk.Frame):
         self.msg_rate_var = tk.StringVar(value="0 msg/s")
         self.send_rate_var = tk.StringVar(value="0 msg/s")
         self.camera_fps_var = tk.StringVar(value="0.0 fps")
+        self.device_status_var = tk.StringVar(value="Unknown")
+        self.calib_status_var = tk.StringVar(value="Not calibrated")
         
         self._build_ui()
     
@@ -55,6 +57,13 @@ class StatusBar(ttk.Frame):
         ttk.Label(self, textvariable=self.camera_fps_var, width=12).pack(
             side="left"
         )
+        
+        # Device movement status
+        self._device_status_lbl = tk.Label(self, textvariable=self.device_status_var, width=20, bg="yellow")
+        self._device_status_lbl.pack(side="left", padx=(12, 8))
+        # Calibration status
+        self._calib_status_lbl = tk.Label(self, textvariable=self.calib_status_var, width=18, bg="red")
+        self._calib_status_lbl.pack(side="left", padx=(6, 8))
     
     def update_message_rate(self, rate):
         """
@@ -107,6 +116,40 @@ class StatusBar(ttk.Frame):
             self.update_send_rate(send_rate)
         if camera_fps is not None:
             self.update_camera_fps(camera_fps)
+
+    def update_device_status(self, stationary: bool):
+        """
+        Update device movement status indicator.
+
+        Args:
+            stationary: True if device is stationary, False if moving
+        """
+        try:
+            if stationary:
+                self.device_status_var.set("Device: Stationary")
+                self._device_status_lbl.configure(bg="green")
+            else:
+                self.device_status_var.set("Device: Moving")
+                self._device_status_lbl.configure(bg="yellow")
+        except Exception:
+            pass
+
+    def update_calibration_status(self, calibrated: bool):
+        """
+        Update gyro calibration status indicator.
+
+        Args:
+            calibrated: True if gyro yaw bias has been calibrated
+        """
+        try:
+            if calibrated:
+                self.calib_status_var.set("Gyro: Calibrated")
+                self._calib_status_lbl.configure(bg="green")
+            else:
+                self.calib_status_var.set("Gyro: Not calibrated")
+                self._calib_status_lbl.configure(bg="red")
+        except Exception:
+            pass
     
     def reset(self):
         """Reset all metrics to zero."""

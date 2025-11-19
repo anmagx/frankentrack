@@ -1,7 +1,9 @@
 """
 gui package for acceltrack.
 
-Provides error handling, logging, and common helper functions.
+Provides gui components.
 """
 
-__all__ = []
+from workers.gui.test_panels import TestApp
+
+__all__ = ['TestApp']

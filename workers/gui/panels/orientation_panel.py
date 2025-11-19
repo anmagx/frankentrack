@@ -9,7 +9,7 @@ from tkinter import ttk
 
 from config.config import (
     DEFAULT_CENTER_THRESHOLD,
-    QUEUE_PUT_TIMEOUT
+    QUEUE_PUT_TIMEOUT,
 )
 from util.error_utils import safe_queue_put
 
@@ -51,6 +51,7 @@ class OrientationPanel(ttk.LabelFrame):
         self.drift_angle_var = tk.DoubleVar(value=DEFAULT_CENTER_THRESHOLD)
         self.drift_angle_display = tk.StringVar(value=f"{DEFAULT_CENTER_THRESHOLD:.1f}")
         self.drift_status_var = tk.StringVar(value="Drift Correction Inactive")
+
         
         self._build_ui()
     
@@ -148,6 +149,8 @@ class OrientationPanel(ttk.LabelFrame):
         ttk.Label(parent, textvariable=self.drift_angle_display, width=4).grid(
             row=2, column=5, sticky="w", padx=(0, 12)
         )
+
+        
     
     def _build_drift_status(self, parent):
         """Build drift correction status indicator."""
@@ -166,6 +169,14 @@ class OrientationPanel(ttk.LabelFrame):
             command=self._on_reset
         )
         self.reset_btn.pack(padx=6, pady=(4, 6))
+        
+        # Recalibrate gyro bias button (runtime)
+        self.recal_btn = ttk.Button(
+            parent,
+            text="Recalibrate Gyro Bias",
+            command=self._on_recalibrate
+        )
+        self.recal_btn.pack(padx=6, pady=(2, 6))
     
     def _on_drift_angle_change(self, val):
         """Handle drift angle slider changes."""
@@ -184,6 +195,8 @@ class OrientationPanel(ttk.LabelFrame):
         ):
             if self.message_callback:
                 self.message_callback("Failed to send drift angle update")
+
+    
     
     def _on_reset(self):
         """Handle orientation reset button click."""
@@ -210,6 +223,17 @@ class OrientationPanel(ttk.LabelFrame):
                 self.message_callback("Position offsets updated to make current position zero")
         except Exception:
             pass
+
+    def _on_recalibrate(self):
+        """Request runtime gyro bias recalibration from the fusion worker."""
+        # Send recalibrate command; worker will use configured sample count
+        if not safe_queue_put(self.control_queue, ('recalibrate_gyro_bias',), timeout=QUEUE_PUT_TIMEOUT):
+            if self.message_callback:
+                self.message_callback("Failed to send recalibration request")
+            return
+
+        if self.message_callback:
+            self.message_callback("Gyro bias recalibration requested")
     
     def update_euler(self, yaw, pitch, roll):
         """
@@ -305,6 +329,8 @@ class OrientationPanel(ttk.LabelFrame):
                     )
             except Exception:
                 pass
+
+        # (yaw alpha removed)
     
     def reset_position_offsets(self):
         """Reset position offsets to zero (for testing or manual reset)."""
@@ -346,3 +372,4 @@ class OrientationPanel(ttk.LabelFrame):
                 )
         except Exception:
             pass
+    

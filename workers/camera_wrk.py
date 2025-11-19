@@ -32,7 +32,9 @@ from config.config import (
     DEFAULT_CAMERA_HEIGHT,
     DEFAULT_DETECTION_THRESHOLD,
     FPS_REPORT_INTERVAL,
-    QUEUE_PUT_TIMEOUT
+    QUEUE_PUT_TIMEOUT,
+    CAMERA_LOOP_DELAY,
+    CAPTURE_RETRY_DELAY
 )
 from util.error_utils import safe_queue_put, safe_queue_get, clamp, safe_float_convert
 
@@ -135,6 +137,8 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
         # FPS reporting for actual camera input (frames read from capture)
         frames_count = 0
         last_fps_ts = time.time()
+        # track whether capture was open on previous loop to detect transitions
+        cap_was_open = False
 
         while stop_event is None or not stop_event.is_set():
             # process control commands (drain queue)
@@ -205,6 +209,11 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                 except Exception:
                     pass
                 cap = None
+                # notify UI that camera is idle (0 fps)
+                try:
+                    safe_queue_put(statusQueue, ('cam_fps', 0.0), timeout=QUEUE_PUT_TIMEOUT)
+                except Exception:
+                    pass
 
             # ensure capture open if preview or tracking required
             if (want_preview or tracking) and cap is None:
@@ -224,7 +233,7 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
 
             if cap is None:
                 try:
-                    time.sleep(0.05)
+                    time.sleep(CAPTURE_RETRY_DELAY)
                 except KeyboardInterrupt:
                     break
                 continue
@@ -232,10 +241,12 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
             ret, frame = cap.read()
             if not ret or frame is None:
                 try:
-                    time.sleep(0.02)
+                    time.sleep(CAPTURE_RETRY_DELAY)
                 except KeyboardInterrupt:
                     break
                 continue
+            # mark that cap is open
+            cap_was_open = True
             # Count frame for FPS calculation
             try:
                 frames_count += 1
@@ -336,8 +347,23 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
             except Exception:
                 pass
 
-            # throttle loop a bit
-            time.sleep(0.01)
+            # Frame pacing: if desired_fps was requested, try to pace loop to that rate.
+            # Otherwise, fall back to a small sleep to avoid busy-looping.
+            try:
+                loop_elapsed = time.time() - now
+                if desired_fps is not None and desired_fps > 0:
+                    target_interval = 1.0 / float(desired_fps)
+                    delay = target_interval - loop_elapsed
+                    if delay > 0:
+                        time.sleep(delay)
+                else:
+                    # small sleep to yield CPU when no explicit fps target
+                    time.sleep(CAMERA_LOOP_DELAY)
+            except Exception:
+                try:
+                    time.sleep(CAMERA_LOOP_DELAY)
+                except Exception:
+                    pass
 
     finally:
         try:

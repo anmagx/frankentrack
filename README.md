@@ -5,7 +5,7 @@ Optional single-point IR-LED tracking feature for X/Y movement estimation.
 
 ## What is Frankentrack? 
 
-Frankentrack is the product of unholy combination of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and quite cost effective 5DOF headtracking solution with a smaller physical footprint than traditional 3-point trackers.
+Frankentrack is the product of unholy combination of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and cost effective 5DOF headtracking solution with a smaller physical footprint than traditional 3-point trackers.
 
 ## Features
 

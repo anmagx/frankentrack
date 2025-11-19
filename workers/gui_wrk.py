@@ -272,6 +272,18 @@ class AppV2(tk.Tk):
                         if hasattr(self, 'orientation_panel'):
                             active = bool(status[1])
                             self.orientation_panel.update_drift_status(active)
+                    elif status[0] == 'stationary':
+                        if hasattr(self, 'status_bar'):
+                            try:
+                                self.status_bar.update_device_status(bool(status[1]))
+                            except Exception:
+                                pass
+                    elif status[0] == 'gyro_calibrated':
+                        if hasattr(self, 'status_bar'):
+                            try:
+                                self.status_bar.update_calibration_status(bool(status[1]))
+                            except Exception:
+                                pass
                     elif status[0] == 'msg_rate':
                         if hasattr(self, 'status_bar'):
                             self.status_bar.update_message_rate(float(status[1]))
@@ -287,9 +299,16 @@ class AppV2(tk.Tk):
                 preview = safe_queue_get(self.cameraPreviewQueue, timeout=0.0, default=None)
                 if preview is None:
                     break
-                # Handle preview frame (JPEG bytes)
-                if hasattr(self, 'camera_panel') and isinstance(preview, bytes):
-                    self.camera_panel.update_preview(preview)
+                # Handle preview frame (JPEG bytes). Camera worker may send
+                # either raw bytes or a tuple (bytes, timestamp), accept both.
+                if hasattr(self, 'camera_panel'):
+                    try:
+                        if isinstance(preview, (bytes, bytearray)):
+                            self.camera_panel.update_preview(preview)
+                        elif isinstance(preview, (list, tuple)) and len(preview) >= 1 and isinstance(preview[0], (bytes, bytearray)):
+                            self.camera_panel.update_preview(preview[0])
+                    except Exception:
+                        pass
             
             # Check stop event
             if self.stop_event and hasattr(self.stop_event, 'is_set') and self.stop_event.is_set():

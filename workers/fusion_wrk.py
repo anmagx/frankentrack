@@ -11,7 +11,12 @@ from config.config import (
      ACCEL_THRESHOLD,
      DEFAULT_CENTER_THRESHOLD,
      ALPHA_YAW,
+     ALPHA_PITCH,
+     ALPHA_ROLL,
      ALPHA_DRIFT_CORRECTION,
+        GYRO_BIAS_CAL_SAMPLES,
+    STATIONARY_GYRO_THRESHOLD,
+    STATIONARY_DEBOUNCE_S,
      DT_MIN,
      DT_MAX,
      QUEUE_GET_TIMEOUT,
@@ -39,12 +44,24 @@ class ComplementaryFilter:
             center_threshold: All angles must be within this many degrees of 0 
                             to enable drift correction.
         """
-        self.alpha_roll = 1  # Pure gyro for roll
-        self.alpha_pitch = 1  # Pure gyro for pitch
+        # Gyro weight for complementary filter on roll/pitch (0..1).
+        # Values <1 allow accelerometer to gently correct long-term drift.
+        self.alpha_roll = ALPHA_ROLL  # From config
+        self.alpha_pitch = ALPHA_PITCH  # From config
         self.alpha_yaw = ALPHA_YAW  # From config
         self.alpha_drift = ALPHA_DRIFT_CORRECTION  # From config
         self.accel_threshold = accel_threshold
         self.center_threshold = center_threshold
+        # Gyro bias for yaw (deg/s). This is set at startup by calibration
+        # (if enabled) and is applied as a static correction during runtime.
+        self.gyro_bias_yaw = 0.0
+        # Whether a gyro yaw bias has been calibrated/applied
+        self.gyro_calibrated = False
+        # Stationary detection debounce state
+        self._stationary_start = None
+        self._last_stationary = False
+        self._gyro_stationary_threshold = STATIONARY_GYRO_THRESHOLD
+        self._stationary_debounce_s = STATIONARY_DEBOUNCE_S
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
@@ -96,20 +113,38 @@ class ComplementaryFilter:
         
         gx, gy, gz = gyro
         
+        # Apply gyro bias correction for yaw before integration
+        gz_corr = gz - self.gyro_bias_yaw
+
         # Gyro integration (primary method)
         gyro_roll = self.roll + gx * dt
         gyro_pitch = self.pitch + gy * dt
-        gyro_yaw = self.yaw + gz * dt
+        gyro_yaw = self.yaw + gz_corr * dt
         
-        # Check if accelerometer is measuring primarily gravity (sensor is stationary)
+        # Check if accelerometer is measuring primarily gravity (sensor is quiet)
         ax, ay, az = accel
         accel_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
-        
-        # Avoid division by zero and check if magnitude is close to 1g
-        if accel_magnitude < 0.01:
-            is_stationary = False
+
+        # Compute instantaneous gyro magnitude (deg/s)
+        gyro_mag = np.sqrt(gx * gx + gy * gy + gz * gz)
+
+        # Instantaneous candidate for stationary: accel near 1g AND gyro magnitude small
+        accel_ok = False
+        if accel_magnitude >= 0.01:
+            accel_ok = abs(accel_magnitude - 1.0) < self.accel_threshold
+
+        candidate_stationary = accel_ok and (gyro_mag < self._gyro_stationary_threshold)
+
+        # Debounce stationary detection: require candidate to persist for configured time
+        if candidate_stationary:
+            if self._stationary_start is None:
+                self._stationary_start = timestamp
+            # Only mark stationary once persisted
+            is_stationary = (timestamp - self._stationary_start) >= self._stationary_debounce_s
         else:
-            is_stationary = abs(accel_magnitude - 1.0) < self.accel_threshold
+            # Reset debounce
+            self._stationary_start = None
+            is_stationary = False
         
         # Check if we're looking approximately straight ahead (all axes near center)
         def _angle_diff(a, b):
@@ -131,17 +166,33 @@ class ComplementaryFilter:
             self.yaw = self.alpha_yaw * gyro_yaw + (1.0 - self.alpha_yaw) * 0.0
             drift_correction_active = True
         else:
-            # Use pure gyro integration (holds angles perfectly)
-            self.roll = gyro_roll
-            self.pitch = gyro_pitch
+            # Fuse gyro + accel for roll/pitch when accelerometer reliably measures gravity
+            accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
+
+            # Consider accelerometer valid when magnitude is close to 1g
+            accel_valid = accel_magnitude >= 0.01 and abs(accel_magnitude - 1.0) < self.accel_threshold
+
+            if accel_valid:
+                # Blend gyro integration with accel-derived angles for roll/pitch
+                self.roll = self.alpha_roll * gyro_roll + (1.0 - self.alpha_roll) * accel_roll
+                self.pitch = self.alpha_pitch * gyro_pitch + (1.0 - self.alpha_pitch) * accel_pitch
+            else:
+                # Fall back to pure gyro integration when accel data isn't reliable
+                self.roll = gyro_roll
+                self.pitch = gyro_pitch
+
+            # Yaw remains pure gyro (no magnetometer present)
             self.yaw = gyro_yaw
+
+            # Note: live (online) bias estimation removed — bias is set at startup
+            # during calibration (if enabled) and remains static during runtime.
         
         # Normalize angles to [-180, 180]
         self.yaw = normalize_angle(self.yaw)
         self.pitch = normalize_angle(self.pitch)
         self.roll = normalize_angle(self.roll)
         
-        return self.yaw, self.pitch, self.roll, drift_correction_active
+        return self.yaw, self.pitch, self.roll, drift_correction_active, is_stationary
     
     def _accel_to_rp(self, accel):
         """
@@ -186,6 +237,15 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
         center_threshold=DEFAULT_CENTER_THRESHOLD,
         logQueue=logQueue
     )
+    # Startup calibration disabled: calibration must be triggered manually
+    # by the GUI (recalibrate_gyro_bias). Inform GUI of current calibration
+    # state (not calibrated) so the UI can reflect it.
+    try:
+        filter.gyro_calibrated = False
+        safe_queue_put(statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+    except Exception:
+        # Best-effort: don't block startup if statusQueue is unavailable
+        pass
     
     # Translation values (not used, set to 0)
     x, y, z = 0.0, 0.0, 0.0
@@ -211,6 +271,64 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                             log_warning(logQueue, "Fusion Worker", f"Invalid center threshold: {new_val}")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting center threshold: {e}")
+                elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'recalibrate_gyro_bias') or cmd == ('recalibrate_gyro_bias',):
+                    # Runtime recalibration request. Optional second element: number of samples
+                    try:
+                        n_samples = None
+                        if isinstance(cmd, (list, tuple)) and len(cmd) >= 2:
+                            try:
+                                n_samples = int(cmd[1])
+                            except Exception:
+                                n_samples = None
+
+                        if n_samples is None:
+                            n_samples = GYRO_BIAS_CAL_SAMPLES
+
+                        if not n_samples or n_samples <= 0:
+                            log_warning(logQueue, "Fusion Worker", f"Recalibration requested with non-positive sample count: {n_samples}")
+                        else:
+                            log_info(logQueue, "Fusion Worker", f"Recalibrating gyro yaw bias with {n_samples} samples")
+                            print(f"[Fusion Worker] Recalibrating gyro yaw bias ({n_samples} samples)...")
+                            samples = []
+                            last_ts = None
+                            while len(samples) < n_samples and not stop_event.is_set():
+                                line = safe_queue_get(serialQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
+                                if line is None:
+                                    continue
+                                try:
+                                    ts, accel, gyro = parse_imu_line(line)
+                                    # Only accept stationary samples: accel near 1g and gyro quiet
+                                    ax, ay, az = accel
+                                    mag = np.sqrt(ax * ax + ay * ay + az * az)
+                                    gyro_mag = np.sqrt(gyro[0] * gyro[0] + gyro[1] * gyro[1] + gyro[2] * gyro[2])
+                                    if mag >= 0.01 and abs(mag - 1.0) < ACCEL_THRESHOLD and gyro_mag < STATIONARY_GYRO_THRESHOLD:
+                                        samples.append(float(gyro[2]))
+                                        last_ts = ts
+                                except ValueError:
+                                    continue
+
+                            if len(samples) > 0:
+                                bias = sum(samples) / float(len(samples))
+                                filter.gyro_bias_yaw = bias
+                                if last_ts is not None:
+                                    filter.last_time = last_ts
+                                # Mark filter as calibrated and notify GUI
+                                filter.gyro_calibrated = True
+                                try:
+                                    safe_queue_put(statusQueue, ('gyro_calibrated', True), timeout=QUEUE_PUT_TIMEOUT)
+                                except Exception:
+                                    pass
+                                log_info(logQueue, "Fusion Worker", f"Runtime gyro yaw bias recalibrated from {len(samples)} samples: {bias:.6f} deg/s")
+                                print(f"[Fusion Worker] Gyro yaw bias recalibrated: {bias:.6f} deg/s")
+                            else:
+                                filter.gyro_calibrated = False
+                                try:
+                                    safe_queue_put(statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+                                except Exception:
+                                    pass
+                                log_warning(logQueue, "Fusion Worker", "Runtime gyro yaw bias recalibration collected 0 samples")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error during runtime gyro bias recalibration: {e}")
             
             # Get data from serial queue with timeout
             line = safe_queue_get(serialQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
@@ -223,11 +341,13 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                 timestamp, accel, gyro = parse_imu_line(line)
                 
                 # Update filter
-                yaw, pitch, roll, drift_active = filter.update(gyro, accel, timestamp)
+                yaw, pitch, roll, drift_active, is_stationary = filter.update(gyro, accel, timestamp)
                 
                 # Send drift correction status to UI
                 safe_queue_put(statusQueue, ('drift_correction', drift_active), 
                              timeout=QUEUE_PUT_TIMEOUT)
+                # Send stationarity status to UI (used by UI to show moving/stationary)
+                safe_queue_put(statusQueue, ('stationary', is_stationary), timeout=QUEUE_PUT_TIMEOUT)
                 
                 # Put Euler angles into output queues
                 # Format: [Yaw, Pitch, Roll, X, Y, Z]

@@ -3,16 +3,16 @@
 ## Critical (Before v0.1 Release)
 
 ### Documentation
-- [ ] Write README.md
-  - [ ] Project description and features
+- [ x ] Write README.md
+  - [ x ] Project description and features
   - [ ] Hardware requirements (IMU model, Arduino, camera specs)
   - [ ] Installation instructions
   - [ ] Quick start guide
-  - [ ] Serial data format specification
+  - [ x ] Serial data format specification
   - [ ] Configuration guide
   - [ ] Troubleshooting section
-- [ ] Add LICENSE file (see recommendation below)
-- [ ] Create .gitignore file
+- [ x ] Add LICENSE file (see recommendation below)
+- [ x ] Create .gitignore file
 - [ ] Write ARCHITECTURE.md
   - [ ] System overview diagram
   - [ ] Process architecture (workers, queues)
@@ -20,20 +20,20 @@
   - [ ] Module responsibilities
 
 ### Cleanup
-- [ ] Remove gui_wrk_v2.py OR rename/restructure (decide on one GUI version)
-- [ ] Delete deprecated/test files if not needed for release
-- [ ] Remove __pycache__ directories from git tracking
-- [ ] Add missing __init__.py files:
-  - [ ] workers/gui/__init__.py
-  - [ ] workers/gui/managers/__init__.py
+- [ x ] Remove gui_wrk_v2.py OR rename/restructure (decide on one GUI version)
+- [ x ] Delete deprecated/test files if not needed for release
+- [ x ] Remove __pycache__ directories from git tracking
+- [ x ] Add missing __init__.py files:
+  - [ x ] workers/gui/__init__.py
+  - [ x ] workers/gui/managers/__init__.py
 
 ### Code Fixes
-- [ ] Fix hardcoded sleep values in camera_wrk.py (lines 335, 342)
-  - [ ] Add CAMERA_LOOP_DELAY to config.py
-  - [ ] Add CAMERA_RETRY_DELAY to config.py
-- [ ] Add shutdown lock to ProcessHandler (process_man.py)
-  - [ ] Prevent race condition in signal handler
-  - [ ] Add threading.Lock() for stop_workers()
+- [ x ] Fix hardcoded sleep values in camera_wrk.py (lines 335, 342)
+  - [ x ] Add CAMERA_LOOP_DELAY to config.py
+  - [ x ] Add CAMERA_RETRY_DELAY to config.py
+- [ x ] Add shutdown lock to ProcessHandler (process_man.py)
+  - [ x ] Prevent race condition in signal handler
+  - [ x ] Add threading.Lock() for stop_workers()
 
 ### Testing
 - [ ] Test installation on clean Python environment
@@ -44,12 +44,11 @@
 - [ ] Test UDP output with OpenTrack
 
 ### Packaging
-- [ ] Create requirements.txt with pinned versions:
-  - [ ] numpy>=1.20.0
-  - [ ] opencv-python>=4.5.0
-  - [ ] pyserial>=3.5
-  - [ ] Pillow>=8.0.0 (for camera preview)
-- [ ] Optional: Create setup.py for pip installation
+- [ x ] Create requirements.txt with pinned versions:
+  - [ x ] numpy>=1.20.0
+  - [ x ] opencv-python>=4.5.0
+  - [ x ] pyserial>=3.5
+  - [ x ] Pillow>=8.0.0 (for camera preview)
 
 ---
 
@@ -110,59 +109,19 @@
 
 ---
 
-## LICENSE RECOMMENDATION
-
-### Recommended: **MIT License**
-
-**Why MIT?**
-- ✅ Most permissive open-source license
-- ✅ Allows commercial use
-- ✅ Simple and short (easy to understand)
-- ✅ Compatible with almost all other licenses
-- ✅ Popular for hardware + software projects
-- ✅ No requirement to share modifications (but users can if they want)
-- ✅ Good for projects that want maximum adoption
-
-**Other Options:**
-
-### Apache 2.0
-- ✅ Similar to MIT but includes patent protection
-- ✅ Better for projects with corporate contributors
-- ✅ More explicit about contributions
-- ⚠️ Slightly more complex license text
-
-### GPL-3.0
-- ✅ Strong copyleft (derivatives must be open source)
-- ✅ Good if you want to prevent proprietary forks
-- ⚠️ Less permissive (requires sharing modifications)
-- ⚠️ Can limit commercial adoption
-
-### BSD 3-Clause
-- ✅ Similar to MIT, very permissive
-- ✅ Includes non-endorsement clause
-- ✅ Good for academic projects
-
-**My Strong Recommendation: MIT License**
-- Perfect for a head tracking project
-- Allows integration with OpenTrack (already uses permissive licenses)
-- Maximum community adoption potential
-- Simple and clear for contributors
-
----
-
 ## Next Steps (Prioritized)
 
 1. **Phase 1 (Today/Tomorrow - 2-4 hours)**
-   - [ ] Create .gitignore
-   - [ ] Add MIT LICENSE file
-   - [ ] Write basic README.md (use template from review)
-   - [ ] Decide on GUI version (keep gui_wrk_v2.py, remove old?)
-   - [ ] Create requirements.txt
+   - [ x ] Create .gitignore
+   - [ x ] Add MIT LICENSE file
+   - [ x ] Write basic README.md (use template from review)
+   - [ x ] Decide on GUI version (keep gui_wrk_v2.py, remove old?)
+   - [ x ] Create requirements.txt
 
 2. **Phase 2 (This Week - 2-3 hours)**
-   - [ ] Fix hardcoded values
-   - [ ] Add shutdown lock
-   - [ ] Add missing __init__.py files
+   - [ x ] Fix hardcoded values
+   - [ x ] Add shutdown lock
+   - [ x ] Add missing __init__.py files
    - [ ] Test on clean environment
 
 3. **Phase 3 (Next Week - 2-4 hours)**
