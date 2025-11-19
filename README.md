@@ -1,10 +1,11 @@
 # Frankentrack
 
-OpenTrack-Compatible UDP sender for 5DOF (Yaw/Pitch/Roll/X/Y) headtracking utilizing IMU data, written in Python. 
+OpenTrack-Compatible UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion. Written in Python. 
+Optional single-point IR-LED tracking feature for X/Y movement estimation. 
 
 ## What is Frankentrack? 
 
-Frankentrack is the product of unholy combination of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and quite cost effective 5DOF headtracking solution. 
+Frankentrack is the product of unholy combination of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and quite cost effective 5DOF headtracking solution with a smaller physical footprint than traditional 3-point trackers.
 
 ## Features
 
@@ -24,6 +25,9 @@ Frankentrack is the product of unholy combination of IMU sensor data fusion and 
 * Constant drift correction, automatic recentering
 * Optional: Single-point IR-LED tracking using a webcam to compute X/Y position
 
+## Installation
+* Clone repository
+* `python -m pip install requirements.txt`
 
 ## Requirements
 
