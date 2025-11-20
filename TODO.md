@@ -6,7 +6,7 @@
 - [x] Write README.md
   - [x] Project description and features
   - [ ] Hardware requirements (IMU model, Arduino, camera specs)
-  - [ ] Installation instructions
+  - [ ] Installation instructions (including Python 3.8-3.13 requirement)
   - [ ] Quick start guide
   - [x] Serial data format specification
   - [ ] Configuration guide
@@ -47,11 +47,12 @@
 - [ ] Test UDP output with OpenTrack
 
 ### Packaging
-- [x] Create requirements.txt with pinned versions:
-  - [x] numpy>=1.20.0
-  - [x] opencv-python>=4.5.0
-  - [x] pyserial>=3.5
-  - [x] Pillow>=8.0.0 (for camera preview)
+- [x] Create requirements.txt with Python 3.13 compatible versions:
+  - [x] numpy>=1.26.0 (Python 3.13 support, 3.14 experimental)
+  - [x] opencv-python>=4.8.0 (Python 3.13-3.14 wheels)
+  - [x] pyserial>=3.5 (all versions)
+  - [x] Pillow>=10.0.0 (Python 3.13-3.14 support)
+- [x] Add Python version check (3.8-3.13 recommended, 3.14+ experimental)
 
 ---
 
@@ -147,4 +148,6 @@
 - Keep test_panels.py as a development tool (not for end users)
 - Consider renaming main.py → acceltrack.py for clarity
 - Document that config.cfg is auto-generated (user preferences)
-- Mention Python 3.8+ requirement in README
+- **Python Requirements: 3.8-3.13 recommended (binary wheels available)**
+- **Python 3.14+: Experimental (NumPy builds from source, may crash)**
+- Dependencies tested with Python 3.8-3.13 (Nov 2025)

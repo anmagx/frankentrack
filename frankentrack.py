@@ -1,4 +1,23 @@
+import sys
 from process_man import ProcessHandler
+
+# Require Python 3.8 or higher
+if sys.version_info < (3, 8):
+    print("Error: Python 3.8 or higher is required")
+    print(f"Current version: {sys.version}")
+    sys.exit(1)
+
+# Warn about Python 3.14+ (experimental NumPy support)
+if sys.version_info >= (3, 14):
+    print("WARNING: Python 3.14+ detected. NumPy may be unstable (experimental MINGW build).")
+    print("For production use, Python 3.13 or earlier is recommended.")
+    print("Press Ctrl+C to abort, or wait 3 seconds to continue...")
+    try:
+        import time
+        time.sleep(3)
+    except KeyboardInterrupt:
+        print("\nAborted.")
+        sys.exit(0)
 
 def main():
     handler = ProcessHandler()
