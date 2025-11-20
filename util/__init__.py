@@ -1,5 +1,5 @@
 """
-Utility package for acceltrack.
+Utility package for frankentrack.
 
 Provides error handling, logging, and common helper functions.
 """

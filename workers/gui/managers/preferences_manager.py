@@ -43,7 +43,7 @@ class PreferencesManager:
             current = os.path.dirname(__file__)  # .../workers/gui/managers
             workers_gui = os.path.dirname(current)  # .../workers/gui
             workers = os.path.dirname(workers_gui)  # .../workers
-            project_root = os.path.dirname(workers)  # .../acceltrack
+            project_root = os.path.dirname(workers)  # .../frankentrack
             cfg_dir = os.path.join(project_root, 'config')
             return os.path.join(cfg_dir, PREFS_FILE_NAME)
         except Exception:

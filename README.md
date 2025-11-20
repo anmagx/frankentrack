@@ -1,32 +1,46 @@
 # Frankentrack
 
-OpenTrack-Compatible UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion. Written in Python. 
-Optional single-point IR-LED tracking feature for X/Y movement estimation. 
+OpenTrack-Compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
+Supports single-point IR-LED tracking for X/Y movement estimation. 
 
 ## What is Frankentrack? 
 
-Frankentrack is the product of unholy combination of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and cost effective 5DOF headtracking solution with a smaller physical footprint than traditional 3-point trackers.
+Frankentrack is the product of unholy union of IMU sensor data fusion and (optional) single-point IR-LED tracking to achieve a stable, responsive, precise, lightweight and cost effective 5DOF headtracking solution with a smaller physical footprint than traditional 3-point trackers.
+
+Since it only processes data coming in over serial, a wide range of sensors and microcontrollers are supported. The only prerequisite is that incoming data must be structured in csv-style for parsing. More on that below. 
+
+## Project state
+
+This is an early release and there might be bugs present. Contributions are welcome and will be welcomed with warm thanks. 
+
+I also want to be transparent about the fact that this project has seen heavy AI assistant usage. While I tried to make smart decisions, I am happy to learn if someone human knows better. 
+
+Nonetheless, thank you Claude. 
 
 ## Features
 
-### GUI Features
-* Modular tkinter GUI with error handling and logging functions
-* Python multiprocessing using independent queues for IPC
-* Serial reader with debounced output
-* Message panel for printing debug messages
-* Metrics (Serial msgs/s, sent Items/s, camera FPS)
+### Program Features
+* Responsive and fast headtracking solution, supports sending at 120hz
+* Modular gui for monitoring angles, drift correction status, stationarity and more
+* Serial reader for receiving csv-structured IMU Sensor Data
+* Sensor fusion using complementary filter to produce pitch/roll/yaw angles
+* 2-step drift correction procedure for stable viewing angles
+* Single point optical tracking using a webcam to produce X/Y movement
+* UDP sender for sending the values into opentrack
+* Central log file
+* Multiprocess architecture using queues for IPC
 
-### Code structure
-* Central configuration file for runtime constants
-* Central configuration file for user preferences (loaded at startup)
+### Configuration
+* Central configuration file for runtime constants (config/config.py)
+* Central configuration file for user preferences (config/config.cfg)
 
-### Functional Features
-* Performs Sensor fusion with complementary filter to compute euler angles (Yaw/Pitch/Roll) from accelerometer and gyroscope data
-* Constant drift correction, automatic recentering
-* Optional: Single-point IR-LED tracking using a webcam to compute X/Y position
+### Drift Correction
+* First step: Gyro drift estimation using configurable number of samples (do while stationary and level)
+* Second step: Active, subtle drift correction while inside configurable area (effectively recentering)
 
 ## Installation
 * Clone repository
+* Create a venv (Optional, but recommended) 
 * `python -m pip install requirements.txt`
 
 ## Requirements
@@ -34,9 +48,10 @@ Frankentrack is the product of unholy combination of IMU sensor data fusion and 
 **Software**
 
 Python
-* OpenCV
-* pyserial
-* tkinter
+* OpenCV (for camera handling)
+* Pillow (camera preview handling)
+* pyserial (serial reading)
+* tkinter (gui)
 
 **Hardware**
 
@@ -46,29 +61,31 @@ Required data structure:
 
 `time(millis),accX,accY,accZ,gyrX,gyrY,gyrZ`
 
+During tests, message rates of 120hz were absolutely fine, and you could probably go faster than that. However that might require adjusting the queue sizes in config.py, depending on performance.
+
 ## Frequently asked Questions (FAQ)
 
 ### Why?
 
-Professional IR tracking setups can be quite cost prohibitive. There are ample ways to build your own though, with most of them utilizing some variation of the delan clip: 3 IR LEDs, offset relative to each other, and an IR sensitive camera (like the PS3 Eye) tracking them. These are proven and have years of community experience behind them, so if you're looking for a reliable solution, you're probably quite well off with one of those.
+Professional IR tracking setups can be quite costly. There are ample ways to build your own though, with most of them utilizing some variation of the delan clip: 3 IR LEDs, offset relative to each other, and an IR sensitive camera (like the PS3 Eye) tracking them. These are proven and have years of community experience behind them, so if you're looking for a reliable solution, you're probably quite well off with one of those.
 
-I personally just didn't like the way the clip was reaching into my field of view when wearing the headset. It feels bulky, which it needs to be: For precise movement recognition, you need some distance between those LEDs for the algorithm to be able to discern the angles clearly.
+I personally just didn't like the way the clip was reaching into my field of view when wearing the headset. It feels bulky, which it needs to be: For precise movement recognition, you need some distance between those LEDs for the algorithm to be able to discern the angles clearly. Alternatively you can go with a smaller clip, but at the cost of sensitivity and accuracy. 
 
-This project is an attempt at achieve the same result, but in a smaller package: IMUs (Like the MPU6050/6500) are tiny and can deliver surprisingly accurate accelerometer and gyroscope readings, and quite fast too. The provided example utilizing an Arduino Nano with a MPU6500 easily gets to 120Hz, and could probably go even faster.
+This project is an attempt at achieve stable and fast headtracking, but in a smaller physical package: IMUs (Like the MPU6050/6500) are tiny and can deliver surprisingly accurate accelerometer and gyroscope readings, and quite fast too. The provided example utilizing an Arduino Nano with a MPU6500 easily gets to 120Hz, and could probably go even faster.
 
 ### How are the orientation angles computed?
 
-The yaw, pitch and roll angles are computed from accelerometer and gyroscope data using a comparatively simple complementary filter. Pitch and Roll are computed using the accelerometer values (with earth gravity being the reference point) plus the gyroscope for fast movements. Yaw is computed using gyroscope only, as we can't infer a true reference using gravity. As a consequence of this, yaw angle will drift over time. The program implements 2 corrections for this: 
+The yaw, pitch and roll angles are computed from accelerometer and gyroscope data using a comparatively simple complementary filter. Pitch and Roll are computed using the accelerometer values (with earth gravity being the reference point) plus the gyroscope for fast movements. Yaw is computed using gyroscope only, as we can't infer a true reference using gravity. As a consequence of this, yaw angle will naturally drift over time. The program implements 2 corrections for this: 
 
 1. **Calibration**
 
-    At Startup, the sensor itself runs through a short calibration to discern accelerator and gyro offsets. The sensor should be kept **still and level** during this time. After the sensor data comes in, the first samples (Number of calibration samples is configurable) are captured and used to calculate and offset Yaw drift. 
+    On pressing the calibration button, a configurable number of samples are collected. The sensor should be kept **still and level** during this time. These samples are used to compute a gyro bias, which is consequently and constantly applied to each sensor update. This cancels out drift, but due to small fluctuations in the drift rate, it can potentially introduce drift in the adverse direction. This is solved by:
 
 2. **Conditional Drift correction using threshold angle**
 
-     You can set your preferred drift correction threshold angle. The sensor keeps track of it's starting position. When you look around, drift correction is minimal. When you look back to the direction of your starting position, and the pitch, roll and yaw angles are smaller than the drift correction angle threshold, drift correction takes over, and gradually returns the angles to 0. In practice, this means your view is recentered automatically whenever you look straight ahead, leading to stable headtracking even over long session lengths.
+     You can set your preferred drift correction threshold angle. You can think of it as a circle around your 0,0,0 point - whenever your view enters this circle, the angles are gradually and smoothly pulled back to 0,0,0, effectively smoothly recentering the view when you look straight ahead. This achieves quite stable results over long sessions. 
 
-There are lots of sensor fusion algorithms out there which aim to correct this yaw drift (e.g. Kalman, Madgwick, Mahony), but most of them rely on a 9DOF sensor package. In this case a magnetometer is included in the sensor to give a true north reference using earths magnetic field. This however also increases complexity quite a bit, as well as potential for failure. Magnetometers are tricky to calibrate precisely and magnetic interference is everywhere, especially on top of a headset, where the sensor sits. This rather simple solution works quite well for this use case.
+There are lots of sensor fusion algorithms out there which aim to correct this inherentyaw drift (e.g. Kalman, Madgwick, Mahony), but most of them rely on a 9DOF sensor package. In this case a magnetometer is included in the sensor to give a yaw reference using earths magnetic field. This however also increases complexity quite a bit, as well as potential for failure. Magnetometers are tricky to calibrate precisely and magnetic interference is everywhere, especially on top of a headset, where the sensor sits. This rather simple solution works quite well for this use case.
 
 ### How are X/Y positions calculated? 
 
@@ -82,7 +99,7 @@ Z movement is tricky to implement using a single LED. While there are methods (b
 
 Rotating your head (to look at something) rotates the LED, the angle to the camera changes, and with it, light intensity. This causes head rotation to produce unwanted movement detections. 
 
-Adding a second LED and tracking the midpoint between the two can somewhat remedy this. However, I did not get it to work in a satisfying and reliable manner, so the code doesn't support it for now. 
+Adding a second LED and tracking the midpoint between the two can somewhat remedy this. However, I did not get it to work in a satisfying and reliable manner, so the code doesn't support it. Since the main goal of the project is to minimize physical package size, it's a good tradeoff for now. 
 
 ### How does it functionally compare to a traditional 3-point tracking solution? 
 
@@ -92,9 +109,11 @@ Just from my experience, using completely self-built tracking hardware, there ar
 
 With Frankentrack, you're pretty much only limited by the number of sensor readings you can achieve per second, which can easily go into the hundreds - while with a more traditional 3-point tracking, your bottleneck will be the camera (framerate/inherent latency introduced by image processing/compression). With some careful calibration, you can get an incredibly responsive system. My example runs at about 120Hz. 
 
+I've also found that with this solution I can get away with lower filter settings in opentrack, so for me the movement feels considerably less spongy.
+
 **Precision**
 
-In 3-point tracking, the precision of your solution hinges on the construction of your LED-clip. Wider distances between the LEDs offer more precise measurements, but increase overall package size and bulkiness. Also, since you tend to wear the clip on either the left or the right side, rotations may be more consistent in one direction than the other. 
+In 3-point tracking, the precision of your solution hinges on the construction of your LED-clip and the angle of it to your camera. Wider distances between the LEDs offer more precise measurements, but increase overall package size and bulkiness. Also, since you tend to wear the clip on either the left or the right side, rotations may be more consistent in one direction than the other. 
 
 Frankentrack is equally stable in each movement direction. The yaw drift is barely noticeable and blends in with the natural inconsistencies introduced by human movement. It is also recentered gradually each time you look straight ahead, leading to long term stability. 
 
@@ -102,10 +121,14 @@ Frankentrack is equally stable in each movement direction. The yaw drift is bare
 
 With 3-point tracking, I found that some orientations are quite tricky to hold - for example, looking down and moving around the yaw axis always tended to introduce some "wobble" which I couldn't quite get to go away. 
 
-Using IMU angles, there are no angles that are more or less stable than others.
+Using IMU angles, there are no angles that are more or less stable than others, and movement is smooth in all directions. 
 
 **Tradeoffs**
 
 Very fast movements can trip up the internal state of the sensor, leading to a desync of what the sensor expects it's starting position to be and what it actually is. This requires manual recentering, which can be done by the press of a button. 
 
-In practice during normal play, I didn't have this happen very often. 
+In practice during normal play, I only had this happen when I tried to provoke it. 
+
+The calibration phase is very important and must be run at each program startup. The sensor must be upright and relatively level to give precise measurements. While you could calibrate while wearing your headset, you would need to be incredibly still. I would suggest setting your system down for the short startup. 
+
+Drift may be influenced by external factors like temperature or humidity, so the program allows recalibration at any time. After very long periods, the offsets internal to the sensor could be out of sync with changed external factors, requiring a sensor reboot. This of course entirely depends on how the sensor is programmed. 

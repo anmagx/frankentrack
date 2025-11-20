@@ -1,5 +1,5 @@
 """
-Network Panel for Acceltrack GUI.
+Network Panel for frankentrack GUI.
 
 Provides UDP network configuration controls:
 - IP address entry

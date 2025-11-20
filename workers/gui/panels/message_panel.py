@@ -1,5 +1,5 @@
 """
-Message Panel for Acceltrack GUI.
+Message Panel for frankentrack GUI.
 
 Provides two text display areas:
 1. Serial Monitor - Raw serial data from IMU

@@ -1,5 +1,5 @@
 """
-Workers package for acceltrack.
+Workers package for frankentrack.
 
 This package re-houses worker modules so they can be imported as
 `workers.gui`, `workers.camera_wrk`, etc. It intentionally keeps no

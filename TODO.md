@@ -3,16 +3,16 @@
 ## Critical (Before v0.1 Release)
 
 ### Documentation
-- [ x ] Write README.md
-  - [ x ] Project description and features
+- [x] Write README.md
+  - [x] Project description and features
   - [ ] Hardware requirements (IMU model, Arduino, camera specs)
   - [ ] Installation instructions
   - [ ] Quick start guide
-  - [ x ] Serial data format specification
+  - [x] Serial data format specification
   - [ ] Configuration guide
   - [ ] Troubleshooting section
-- [ x ] Add LICENSE file (see recommendation below)
-- [ x ] Create .gitignore file
+- [x] Add LICENSE file (MIT recommended - matches your open collaboration goals)
+- [x] Create .gitignore file
 - [ ] Write ARCHITECTURE.md
   - [ ] System overview diagram
   - [ ] Process architecture (workers, queues)
@@ -20,20 +20,23 @@
   - [ ] Module responsibilities
 
 ### Cleanup
-- [ x ] Remove gui_wrk_v2.py OR rename/restructure (decide on one GUI version)
-- [ x ] Delete deprecated/test files if not needed for release
-- [ x ] Remove __pycache__ directories from git tracking
-- [ x ] Add missing __init__.py files:
-  - [ x ] workers/gui/__init__.py
-  - [ x ] workers/gui/managers/__init__.py
+- [x] Remove gui_wrk_v2.py OR rename/restructure (decide on one GUI version)
+- [x] Delete deprecated/test files if not needed for release
+- [x] Remove __pycache__ directories from git tracking
+- [x] Add missing __init__.py files:
+  - [x] workers/gui/__init__.py
+  - [x] workers/gui/managers/__init__.py
 
 ### Code Fixes
-- [ x ] Fix hardcoded sleep values in camera_wrk.py (lines 335, 342)
-  - [ x ] Add CAMERA_LOOP_DELAY to config.py
-  - [ x ] Add CAMERA_RETRY_DELAY to config.py
-- [ x ] Add shutdown lock to ProcessHandler (process_man.py)
-  - [ x ] Prevent race condition in signal handler
-  - [ x ] Add threading.Lock() for stop_workers()
+- [x] Fix hardcoded sleep values in camera_wrk.py (lines 335, 342)
+  - [x] Add CAMERA_LOOP_DELAY to config.py
+  - [x] Add CAMERA_RETRY_DELAY to config.py
+- [x] Add shutdown lock to ProcessHandler (process_man.py)
+  - [x] Prevent race condition in signal handler
+  - [x] Add threading.Lock() for stop_workers()
+- [ ] Add camera enumeration timeout (currently can hang on dead cameras)
+  - [ ] Add timeout parameter to cv2.VideoCapture() calls
+  - [ ] Add overall enumeration timeout (e.g., 10 seconds max)
 
 ### Testing
 - [ ] Test installation on clean Python environment
@@ -44,11 +47,11 @@
 - [ ] Test UDP output with OpenTrack
 
 ### Packaging
-- [ x ] Create requirements.txt with pinned versions:
-  - [ x ] numpy>=1.20.0
-  - [ x ] opencv-python>=4.5.0
-  - [ x ] pyserial>=3.5
-  - [ x ] Pillow>=8.0.0 (for camera preview)
+- [x] Create requirements.txt with pinned versions:
+  - [x] numpy>=1.20.0
+  - [x] opencv-python>=4.5.0
+  - [x] pyserial>=3.5
+  - [x] Pillow>=8.0.0 (for camera preview)
 
 ---
 
@@ -112,16 +115,16 @@
 ## Next Steps (Prioritized)
 
 1. **Phase 1 (Today/Tomorrow - 2-4 hours)**
-   - [ x ] Create .gitignore
-   - [ x ] Add MIT LICENSE file
-   - [ x ] Write basic README.md (use template from review)
-   - [ x ] Decide on GUI version (keep gui_wrk_v2.py, remove old?)
-   - [ x ] Create requirements.txt
+   - [x] Create .gitignore
+   - [x] Add MIT LICENSE file
+   - [ ] Write basic README.md (use template from review)
+   - [x] Decide on GUI version (keep gui_wrk_v2.py, remove old?)
+   - [x] Create requirements.txt
 
 2. **Phase 2 (This Week - 2-3 hours)**
-   - [ x ] Fix hardcoded values
-   - [ x ] Add shutdown lock
-   - [ x ] Add missing __init__.py files
+   - [x] Fix hardcoded values
+   - [x] Add shutdown lock
+   - [x] Add missing __init__.py files
    - [ ] Test on clean environment
 
 3. **Phase 3 (Next Week - 2-4 hours)**

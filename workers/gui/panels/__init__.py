@@ -1,5 +1,5 @@
 """
-GUI panels package for Acceltrack.
+GUI panels package for frankentrack.
 
 Contains refactored UI panel components for better maintainability.
 Each panel is self-contained and can be tested independently.

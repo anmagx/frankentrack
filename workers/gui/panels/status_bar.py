@@ -1,5 +1,5 @@
 """
-Status Bar for Acceltrack GUI.
+Status Bar for frankentrack GUI.
 
 Displays real-time statistics at the bottom of the window:
 - Message Rate: Messages per second from IMU
@@ -27,8 +27,7 @@ class StatusBar(ttk.Frame):
         self.msg_rate_var = tk.StringVar(value="0 msg/s")
         self.send_rate_var = tk.StringVar(value="0 msg/s")
         self.camera_fps_var = tk.StringVar(value="0.0 fps")
-        self.device_status_var = tk.StringVar(value="Unknown")
-        self.calib_status_var = tk.StringVar(value="Not calibrated")
+        self.device_status_var = tk.StringVar(value="Device status: Unknown")
         
         self._build_ui()
     
@@ -58,12 +57,10 @@ class StatusBar(ttk.Frame):
             side="left"
         )
         
-        # Device movement status
-        self._device_status_lbl = tk.Label(self, textvariable=self.device_status_var, width=20, bg="yellow")
-        self._device_status_lbl.pack(side="left", padx=(12, 8))
-        # Calibration status
-        self._calib_status_lbl = tk.Label(self, textvariable=self.calib_status_var, width=18, bg="red")
-        self._calib_status_lbl.pack(side="left", padx=(6, 8))
+        # Device movement status (right side)
+        # Keep a plain label without platform-specific font handling
+        self._device_status_lbl = ttk.Label(self, textvariable=self.device_status_var, anchor="e")
+        self._device_status_lbl.pack(side="right", padx=(8, 12))
     
     def update_message_rate(self, rate):
         """
@@ -126,11 +123,9 @@ class StatusBar(ttk.Frame):
         """
         try:
             if stationary:
-                self.device_status_var.set("Device: Stationary")
-                self._device_status_lbl.configure(bg="green")
+                self.device_status_var.set("Device status: stationary")
             else:
-                self.device_status_var.set("Device: Moving")
-                self._device_status_lbl.configure(bg="yellow")
+                self.device_status_var.set("Device status: moving")
         except Exception:
             pass
 
@@ -141,15 +136,8 @@ class StatusBar(ttk.Frame):
         Args:
             calibrated: True if gyro yaw bias has been calibrated
         """
-        try:
-            if calibrated:
-                self.calib_status_var.set("Gyro: Calibrated")
-                self._calib_status_lbl.configure(bg="green")
-            else:
-                self.calib_status_var.set("Gyro: Not calibrated")
-                self._calib_status_lbl.configure(bg="red")
-        except Exception:
-            pass
+        # Calibration status handled by CalibrationPanel now
+        return
     
     def reset(self):
         """Reset all metrics to zero."""

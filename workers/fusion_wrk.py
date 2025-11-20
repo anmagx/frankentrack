@@ -83,11 +83,22 @@ class ComplementaryFilter:
         if self.last_time is None:
             # First call: establish a time baseline and return a zeroed
             # orientation so the system starts centered at 0,0,0.
+            # Log that we're initializing timing baseline (useful after reset)
+            try:
+                from util.log_utils import log_info
+                log_info(self.logQueue, "Fusion", f"Initializing timing baseline at {timestamp}")
+            except Exception:
+                pass
+            try:
+                print(f"[Fusion] Initializing timing baseline at {timestamp}")
+            except Exception:
+                pass
             self.last_time = timestamp
             self.roll = 0.0
             self.pitch = 0.0
             self.yaw = 0.0
-            return self.yaw, self.pitch, self.roll, False
+            # Return consistent 5-tuple: (yaw, pitch, roll, drift_active, is_stationary)
+            return self.yaw, self.pitch, self.roll, False, False
         
         # Calculate dt
         dt = timestamp - self.last_time
@@ -256,10 +267,52 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             cmd = safe_queue_get(controlQueue, timeout=0.0, default=None)
             if cmd is not None:
                 # support control commands: 'reset' and ('set_center_threshold', value)
-                if cmd == 'reset':
+                # Accept both bare string commands and tuple/list variants
+                if cmd == 'reset_orientation' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset_orientation'):
+                    # Reset orientation state but preserve calibration/bias.
                     filter.reset()
-                    log_info(logQueue, "Fusion Worker", "Orientation reset to zero")
-                    print("[Fusion Worker] Orientation reset to zero")
+                    log_info(logQueue, "Fusion Worker", "Orientation reset to zero (preserving calibration)")
+                    print("[Fusion Worker] Orientation reset to zero (preserving calibration)")
+                elif cmd == 'reset' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset'):
+                    # Full reset: reset orientation and clear runtime calibration
+                    filter.reset()
+                    # Clear timing and stationary debounce state so the filter
+                    # reinitializes cleanly when new data arrives after a stop/start.
+                    try:
+                        filter.last_time = None
+                        filter._stationary_start = None
+                        filter._last_stationary = False
+                        # Log timing baseline clear for debugging
+                        try:
+                            from util.log_utils import log_info
+                            log_info(logQueue, "Fusion Worker", "Cleared timing baseline and stationary debounce state on reset")
+                        except Exception:
+                            pass
+                        try:
+                            print("[Fusion Worker] Cleared timing baseline and stationary debounce state on reset")
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        filter.gyro_bias_yaw = 0.0
+                        filter.gyro_calibrated = False
+                        safe_queue_put(statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+                    except Exception:
+                        pass
+
+                    # Also explicitly clear drift and stationary UI indicators so the
+                    # front-end does not continue to show stale 'active' state after stop.
+                    try:
+                        safe_queue_put(statusQueue, ('drift_correction', False), timeout=QUEUE_PUT_TIMEOUT)
+                    except Exception:
+                        pass
+                    try:
+                        safe_queue_put(statusQueue, ('stationary', False), timeout=QUEUE_PUT_TIMEOUT)
+                    except Exception:
+                        pass
+                    log_info(logQueue, "Fusion Worker", "Orientation reset to zero and calibration cleared")
+                    print("[Fusion Worker] Orientation reset to zero and calibration cleared")
                 elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_center_threshold':
                     try:
                         new_val = float(cmd[1])

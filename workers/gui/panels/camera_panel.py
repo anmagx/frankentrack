@@ -388,7 +388,7 @@ class CameraPanel(ttk.LabelFrame):
     def _on_enumerate_clicked(self):
         """Handler for 'Enumerate Cameras' button."""
         self.enumerate_btn.configure(state='disabled')
-        self._log_message("Camera enumeration started")
+        self._log_message("Camera enumeration started (this can take a minute)...")
         
         # Disable controls during enumeration
         self._disable_controls_for_enumeration()

@@ -1,9 +1,13 @@
 """
-gui package for acceltrack.
+gui package for frankentrack.
 
 Provides gui components.
 """
 
-from workers.gui.test_panels import TestApp
+# Keep package init lightweight. Importing test modules at package
+# import time can cause the test submodule to be loaded twice when
+# executed with `python -m workers.gui.test_panels` which triggers
+# the RuntimeWarning seen during development. Tests and harnesses
+# should be imported only by callers when needed.
 
-__all__ = ['TestApp']
+__all__ = []

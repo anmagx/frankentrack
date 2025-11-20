@@ -1,5 +1,5 @@
 """
-Serial Reader Panel for Acceltrack GUI.
+Serial Reader Panel for frankentrack GUI.
 
 Provides controls for serial port selection, baud rate configuration,
 and start/stop functionality.
@@ -18,7 +18,7 @@ from util.error_utils import safe_queue_put
 class SerialPanel(ttk.LabelFrame):
     """Panel for serial port configuration and control."""
     
-    def __init__(self, parent, serial_control_queue, message_callback, padding=8):
+    def __init__(self, parent, serial_control_queue, message_callback, padding=8, on_stop=None):
         """
         Initialize the Serial Panel.
         
@@ -32,6 +32,10 @@ class SerialPanel(ttk.LabelFrame):
         
         self.serial_control_queue = serial_control_queue
         self.message_callback = message_callback
+        # Optional callback invoked when serial is stopped. Allows the
+        # application to perform global reset actions (draining queues,
+        # resetting calibration, etc.). Signature: callable() -> None
+        self.on_stop = on_stop
         
         # State variables
         self.port_var = tk.StringVar(value=DEFAULT_SERIAL_PORT)
@@ -133,6 +137,17 @@ class SerialPanel(ttk.LabelFrame):
         self.btn_text.set("Start")
         self.status_var.set("Stopped")
         self.message_callback("Stop requested")
+        
+        # Perform optional global stop actions (reset calibration, drain queues)
+        try:
+            if callable(self.on_stop):
+                self.on_stop()
+        except Exception:
+            # Don't let an on_stop failure break the UI
+            try:
+                self.message_callback("on_stop handler raised an exception")
+            except Exception:
+                pass
     
     def get_prefs(self):
         """

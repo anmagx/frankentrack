@@ -1,5 +1,5 @@
 """
-GUI managers package for acceltrack.
+GUI managers package for frankentrack.
 
 Contains utility classes for GUI operations:
 - PreferencesManager: Centralized preference persistence

@@ -1,5 +1,5 @@
 """
-Orientation Panel for Acceltrack GUI.
+Orientation Panel for frankentrack GUI.
 
 Displays Euler angles (Yaw, Pitch, Roll), position (X, Y, Z),
 drift correction controls, and orientation reset functionality.
@@ -7,11 +7,10 @@ drift correction controls, and orientation reset functionality.
 import tkinter as tk
 from tkinter import ttk
 
-from config.config import (
-    DEFAULT_CENTER_THRESHOLD,
-    QUEUE_PUT_TIMEOUT,
-)
+from config.config import QUEUE_PUT_TIMEOUT
 from util.error_utils import safe_queue_put
+
+
 
 
 class OrientationPanel(ttk.LabelFrame):
@@ -47,9 +46,7 @@ class OrientationPanel(ttk.LabelFrame):
         self._y_offset = 0.0
         self._last_raw_translation = (0.0, 0.0, 0.0)
         
-        # Drift correction controls
-        self.drift_angle_var = tk.DoubleVar(value=DEFAULT_CENTER_THRESHOLD)
-        self.drift_angle_display = tk.StringVar(value=f"{DEFAULT_CENTER_THRESHOLD:.1f}")
+        # Drift correction status (display-only, control moved to CalibrationPanel)
         self.drift_status_var = tk.StringVar(value="Drift Correction Inactive")
 
         
@@ -72,11 +69,20 @@ class OrientationPanel(ttk.LabelFrame):
         # Build left section components
         self._build_euler_displays(left_frame)
         self._build_position_displays(left_frame)
-        self._build_drift_control(left_frame)
+        # Drift controls moved to `CalibrationPanel` to keep this class focused on display
         
         # Build right section components
         self._build_drift_status(right_frame)
-        self._build_reset_button(right_frame)
+        # Add Reset Orientation button here (moved from CalibrationPanel)
+        try:
+            self.reset_btn = ttk.Button(
+                right_frame,
+                text="Reset Orientation",
+                command=self._on_reset
+            )
+            self.reset_btn.pack(padx=6, pady=(4, 6))
+        except Exception:
+            pass
     
     def _build_euler_displays(self, parent):
         """Build Euler angle (Yaw, Pitch, Roll) display row."""
@@ -126,29 +132,7 @@ class OrientationPanel(ttk.LabelFrame):
             row=1, column=5, sticky="w", padx=(0, 12)
         )
     
-    def _build_drift_control(self, parent):
-        """Build drift correction angle slider."""
-        # Row 2: Drift correction slider
-        ttk.Label(parent, text="Drift Correction Angle:").grid(
-            row=2, column=0, columnspan=2, sticky="w", padx=6, pady=6
-        )
-        
-        self.drift_scale = tk.Scale(
-            parent,
-            from_=0,
-            to=25,
-            orient="horizontal",
-            length=220,
-            variable=self.drift_angle_var,
-            command=self._on_drift_angle_change
-        )
-        self.drift_scale.grid(
-            row=2, column=2, columnspan=3, sticky="w", padx=6, pady=6
-        )
-        
-        ttk.Label(parent, textvariable=self.drift_angle_display, width=4).grid(
-            row=2, column=5, sticky="w", padx=(0, 12)
-        )
+    # Drift control UI and logic moved to `calibration_panel.CalibrationPanel`
 
         
     
@@ -161,22 +145,6 @@ class OrientationPanel(ttk.LabelFrame):
         )
         self.drift_status_lbl.pack(padx=6, pady=(6, 4))
     
-    def _build_reset_button(self, parent):
-        """Build orientation reset button."""
-        self.reset_btn = ttk.Button(
-            parent,
-            text="Reset Orientation",
-            command=self._on_reset
-        )
-        self.reset_btn.pack(padx=6, pady=(4, 6))
-        
-        # Recalibrate gyro bias button (runtime)
-        self.recal_btn = ttk.Button(
-            parent,
-            text="Recalibrate Gyro Bias",
-            command=self._on_recalibrate
-        )
-        self.recal_btn.pack(padx=6, pady=(2, 6))
     
     def _on_drift_angle_change(self, val):
         """Handle drift angle slider changes."""
@@ -186,29 +154,31 @@ class OrientationPanel(ttk.LabelFrame):
             v = 0.0
         
         self.drift_angle_display.set(f"{v:.1f}")
-        
-        # Send new threshold to fusion worker
-        if not safe_queue_put(
-            self.control_queue,
-            ('set_center_threshold', float(v)),
-            timeout=QUEUE_PUT_TIMEOUT
-        ):
-            if self.message_callback:
-                self.message_callback("Failed to send drift angle update")
+        # (Control forwarding moved to CalibrationPanel)
 
     
     
     def _on_reset(self):
         """Handle orientation reset button click."""
-        # Send reset command to fusion worker
-        if not safe_queue_put(self.control_queue, 'reset', timeout=QUEUE_PUT_TIMEOUT):
+        # Send non-destructive orientation reset command to fusion worker.
+        # Use 'reset_orientation' so the fusion worker resets orientation
+        # state but does not clear gyro calibration (which is intended only
+        # for a full session reset triggered by stopping serial).
+        try:
+            if self.control_queue:
+                if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
+                    if self.message_callback:
+                        self.message_callback("Failed to send reset command")
+                    return
+        except Exception:
+            # If sending the command fails for unexpected reasons, report and continue
             if self.message_callback:
                 self.message_callback("Failed to send reset command")
             return
-        
+
         if self.message_callback:
             self.message_callback("Orientation reset requested (from GUI)")
-        
+
         # Reset translation offsets so displayed X/Y become zero
         try:
             lx, ly, lz = self._last_raw_translation
@@ -218,7 +188,7 @@ class OrientationPanel(ttk.LabelFrame):
             # Update displayed values to zero
             self.x_var.set("0.00")
             self.y_var.set("0.00")
-            
+
             if self.message_callback:
                 self.message_callback("Position offsets updated to make current position zero")
         except Exception:
@@ -226,14 +196,9 @@ class OrientationPanel(ttk.LabelFrame):
 
     def _on_recalibrate(self):
         """Request runtime gyro bias recalibration from the fusion worker."""
-        # Send recalibrate command; worker will use configured sample count
-        if not safe_queue_put(self.control_queue, ('recalibrate_gyro_bias',), timeout=QUEUE_PUT_TIMEOUT):
-            if self.message_callback:
-                self.message_callback("Failed to send recalibration request")
-            return
-
+        # Recalibration is handled by CalibrationPanel now; keep as no-op placeholder
         if self.message_callback:
-            self.message_callback("Gyro bias recalibration requested")
+            self.message_callback("Gyro bias recalibration requested (handled by CalibrationPanel)")
     
     def update_euler(self, yaw, pitch, roll):
         """
@@ -300,9 +265,8 @@ class OrientationPanel(ttk.LabelFrame):
         Returns:
             dict: Dictionary with 'drift_angle' key
         """
-        return {
-            'drift_angle': str(self.drift_angle_var.get())
-        }
+        # Orientation panel has no persistent preferences
+        return {}
     
     def set_prefs(self, prefs):
         """
@@ -311,26 +275,8 @@ class OrientationPanel(ttk.LabelFrame):
         Args:
             prefs: Dictionary with optional 'drift_angle' key
         """
-        if prefs is None:
-            return
-        
-        if 'drift_angle' in prefs and prefs['drift_angle']:
-            try:
-                angle = float(prefs['drift_angle'])
-                self.drift_angle_var.set(angle)
-                self.drift_angle_display.set(f"{angle:.1f}")
-                
-                # Send to fusion worker
-                if self.control_queue:
-                    safe_queue_put(
-                        self.control_queue,
-                        ('set_center_threshold', angle),
-                        timeout=QUEUE_PUT_TIMEOUT
-                    )
-            except Exception:
-                pass
-
-        # (yaw alpha removed)
+        # Orientation display panel has no preferences to apply here.
+        return
     
     def reset_position_offsets(self):
         """Reset position offsets to zero (for testing or manual reset)."""
@@ -341,35 +287,5 @@ class OrientationPanel(ttk.LabelFrame):
         self.y_var.set("0.00")
         self.z_var.set("0.00")
     
-    def get_drift_angle(self):
-        """
-        Get current drift correction angle.
-        
-        Returns:
-            float: Current drift angle setting
-        """
-        return self.drift_angle_var.get()
-    
-    def set_drift_angle(self, angle):
-        """
-        Set drift correction angle programmatically.
-        
-        Args:
-            angle: Drift angle in degrees (0-25)
-        """
-        try:
-            angle = float(angle)
-            angle = max(0.0, min(25.0, angle))  # Clamp to valid range
-            self.drift_angle_var.set(angle)
-            self.drift_angle_display.set(f"{angle:.1f}")
-            
-            # Send to fusion worker
-            if self.control_queue:
-                safe_queue_put(
-                    self.control_queue,
-                    ('set_center_threshold', angle),
-                    timeout=QUEUE_PUT_TIMEOUT
-                )
-        except Exception:
-            pass
+    # Drift controls (get/set) have been moved to CalibrationPanel
     

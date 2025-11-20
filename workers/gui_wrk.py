@@ -21,6 +21,7 @@ from config.config import (
     DEFAULT_UDP_PORT,
     DEFAULT_DETECTION_THRESHOLD,
     DEFAULT_CENTER_THRESHOLD,
+    QUEUE_PUT_TIMEOUT,
     PREVIEW_WIDTH,
     PREVIEW_HEIGHT
 )
@@ -32,6 +33,7 @@ from workers.gui.panels.status_bar import StatusBar
 from workers.gui.panels.network_panel import NetworkPanel
 from workers.gui.panels.camera_panel import CameraPanel
 from workers.gui.managers.preferences_manager import PreferencesManager
+from workers.gui.panels.calibration_panel import CalibrationPanel
 
 
 class AppV2(tk.Tk):
@@ -47,7 +49,7 @@ class AppV2(tk.Tk):
                  translationDisplayQueue=None, cameraControlQueue=None, 
                  cameraPreviewQueue=None, udpControlQueue=None, poll_ms=GUI_POLL_INTERVAL_MS):
         super().__init__()
-        self.title("acceltrack v.01 (Refactored)")
+        self.title("frankentrack v.01 (Refactored)")
         self.resizable(False, False)
         
         # Store queues
@@ -96,7 +98,8 @@ class AppV2(tk.Tk):
             left_col,
             self.serialControlQueue,
             self.append_message,
-            padding=8
+            padding=8,
+            on_stop=self._on_serial_stop
         )
         self.serial_panel.pack(fill="x", expand=False, padx=0, pady=0)
         
@@ -117,6 +120,15 @@ class AppV2(tk.Tk):
             padding=6
         )
         self.orientation_panel.pack(fill="x", expand=False, padx=0, pady=(0, 8))
+
+        # Create CalibrationPanel (controls moved out of OrientationPanel)
+        self.calibration_panel = CalibrationPanel(
+            left_col,
+            self.controlQueue,
+            self.append_message,
+            padding=6
+        )
+        self.calibration_panel.pack(fill="x", expand=False, padx=0, pady=(0, 8))
         
         # Create NetworkPanel (refactored) in right column
         self.network_panel = NetworkPanel(
@@ -167,6 +179,8 @@ class AppV2(tk.Tk):
         # Apply to OrientationPanel
         if hasattr(self, 'orientation_panel'):
             self.orientation_panel.set_prefs(prefs)
+        if hasattr(self, 'calibration_panel'):
+            self.calibration_panel.set_prefs(prefs)
         
         # Apply to NetworkPanel
         if hasattr(self, 'network_panel'):
@@ -177,6 +191,51 @@ class AppV2(tk.Tk):
             self.camera_panel.set_prefs(prefs)
         
         self.append_message("Preferences loaded")
+
+    def _on_serial_stop(self):
+        """Perform global reset actions when serial reading is stopped.
+
+        - Request gyro recalibration from the fusion/control queue
+        - Drain common queues so the application starts fresh
+        """
+        try:
+            self.append_message("Serial stopped: requesting recalibration and draining queues")
+
+            # Request a full fusion reset if control queue exists
+            try:
+                if self.controlQueue:
+                    safe_queue_put(self.controlQueue, ('reset',), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception:
+                pass
+
+            # Drain non-control/display queues to clear UI buffers. Do NOT
+            # drain control queues (e.g. serialControlQueue or controlQueue)
+            # because they carry commands that must be delivered to workers.
+            for q in (self.messageQueue, self.serialDisplayQueue,
+                      self.eulerDisplayQueue, self.translationDisplayQueue,
+                      self.cameraPreviewQueue, self.statusQueue):
+                if not q:
+                    continue
+                try:
+                    while True:
+                        item = safe_queue_get(q, timeout=0.0, default=None)
+                        if item is None:
+                            break
+                except Exception:
+                    pass
+
+            # Inform UI that gyro is no longer calibrated by sending a status
+            try:
+                if self.statusQueue:
+                    safe_queue_put(self.statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception:
+                pass
+
+        except Exception:
+            try:
+                self.append_message("Error while performing serial stop actions")
+            except Exception:
+                pass
     
     def _save_preferences(self):
         """Save current preferences."""
@@ -190,6 +249,9 @@ class AppV2(tk.Tk):
         # OrientationPanel preferences
         if hasattr(self, 'orientation_panel'):
             prefs.update(self.orientation_panel.get_prefs())
+        # CalibrationPanel preferences
+        if hasattr(self, 'calibration_panel'):
+            prefs.update(self.calibration_panel.get_prefs())
         
         # NetworkPanel preferences
         if hasattr(self, 'network_panel'):
@@ -273,13 +335,20 @@ class AppV2(tk.Tk):
                             active = bool(status[1])
                             self.orientation_panel.update_drift_status(active)
                     elif status[0] == 'stationary':
+                        # Stationary/device movement status shown in StatusBar
                         if hasattr(self, 'status_bar'):
                             try:
                                 self.status_bar.update_device_status(bool(status[1]))
                             except Exception:
                                 pass
                     elif status[0] == 'gyro_calibrated':
-                        if hasattr(self, 'status_bar'):
+                        # Gyro calibration status shown in CalibrationPanel
+                        if hasattr(self, 'calibration_panel'):
+                            try:
+                                self.calibration_panel.update_calibration_status(bool(status[1]))
+                            except Exception:
+                                pass
+                        elif hasattr(self, 'status_bar'):
                             try:
                                 self.status_bar.update_calibration_status(bool(status[1]))
                             except Exception:

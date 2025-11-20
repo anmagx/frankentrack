@@ -10,6 +10,8 @@ Usage:
 import tkinter as tk
 from tkinter import ttk
 import queue
+from config.config import QUEUE_PUT_TIMEOUT
+from util.error_utils import safe_queue_get, safe_queue_put
 import time
 
 from workers.gui.panels.serial_panel import SerialPanel
@@ -18,6 +20,7 @@ from workers.gui.panels.orientation_panel import OrientationPanel
 from workers.gui.panels.status_bar import StatusBar
 from workers.gui.panels.network_panel import NetworkPanel
 from workers.gui.panels.camera_panel import CameraPanel
+from workers.gui.panels.calibration_panel import CalibrationPanel
 
 
 class TestApp(tk.Tk):
@@ -25,7 +28,7 @@ class TestApp(tk.Tk):
     
     def __init__(self):
         super().__init__()
-        self.title("Acceltrack - Panel Test Harness")
+        self.title("frankentrack - Panel Test Harness")
         self.geometry("900x700")
         
         # Create mock queues for testing
@@ -96,7 +99,8 @@ class TestApp(tk.Tk):
             self.panel_container,
             self.serial_control_queue,
             self.log_message,
-            padding=8
+            padding=8,
+            on_stop=self._on_serial_stop
         )
         
         self.message_panel = MessagePanel(
@@ -107,6 +111,13 @@ class TestApp(tk.Tk):
         )
         
         self.orientation_panel = OrientationPanel(
+            self.panel_container,
+            self.fusion_control_queue,
+            self.log_message,
+            padding=6
+        )
+
+        self.calibration_panel = CalibrationPanel(
             self.panel_container,
             self.fusion_control_queue,
             self.log_message,
@@ -138,6 +149,7 @@ class TestApp(tk.Tk):
         self.serial_panel.pack_forget()
         self.message_panel.pack_forget()
         self.orientation_panel.pack_forget()
+        self.calibration_panel.pack_forget()
         self.network_panel.pack_forget()
         self.camera_panel.pack_forget()
         
@@ -147,7 +159,9 @@ class TestApp(tk.Tk):
         elif panel_name == "MessagePanel":
             self.message_panel.pack(fill="both", expand=True)
         elif panel_name == "OrientationPanel":
-            self.orientation_panel.pack(fill="x", pady=(0, 8))
+            self.orientation_panel.pack(fill="x", pady=(0, 0))
+            # Show calibration panel directly below orientation
+            self.calibration_panel.pack(fill="x", pady=(0, 8))
         elif panel_name == "NetworkPanel":
             self.network_panel.pack(fill="x", pady=(0, 8))
         elif panel_name == "CameraPanel":
@@ -156,6 +170,7 @@ class TestApp(tk.Tk):
             self.serial_panel.pack(fill="x", pady=(0, 8))
             self.message_panel.pack(fill="both", expand=True, pady=(0, 8))
             self.orientation_panel.pack(fill="x", pady=(0, 8))
+            self.calibration_panel.pack(fill="x", pady=(0, 8))
             self.network_panel.pack(fill="x", pady=(0, 8))
             self.camera_panel.pack(fill="both", expand=True)
     
@@ -733,6 +748,51 @@ class TestApp(tk.Tk):
         
         # Schedule next check
         self.after(100, self._monitor_queue)
+
+    def _on_serial_stop(self):
+        """Actions to perform when serial reading is stopped in the test harness.
+
+        This will request a gyro recalibration and drain common queues so the
+        test harness starts a fresh recording session.
+        """
+        try:
+            # Request a full fusion reset on the fusion control queue
+            try:
+                safe_queue_put(self.fusion_control_queue, ('reset',), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception:
+                pass
+
+            # Drain non-control/display queues so UI buffers start fresh.
+            # IMPORTANT: do NOT drain worker control queues here (e.g. serial
+            # control or fusion control) because doing so can remove the
+            # ('stop',) or ('reset',) commands that we just enqueued and
+            # prevent workers from receiving them.
+            for q in (self.message_queue,):
+                try:
+                    while True:
+                        item = safe_queue_get(q, timeout=0.0, default=None)
+                        if item is None:
+                            break
+                except Exception:
+                    pass
+
+            # Mark UI as uncalibrated so the user must explicitly recalibrate
+            try:
+                if hasattr(self, 'calibration_panel'):
+                    self.calibration_panel.update_calibration_status(False)
+            except Exception:
+                pass
+            try:
+                if hasattr(self, 'status_bar'):
+                    # Some test setups may include a status_bar method for calibration
+                    if hasattr(self.status_bar, 'update_calibration_status'):
+                        self.status_bar.update_calibration_status(False)
+            except Exception:
+                pass
+
+            self.log_message("Serial stopped: fusion reset requested, marked uncalibrated, and queues drained")
+        except Exception:
+            self.log_message("Error during on_stop actions")
 
 
 def main():

@@ -69,7 +69,7 @@ class ProcessHandler:
         # Rotate log if it gets too large
         try:
             if os.path.exists(log_file) and os.path.getsize(log_file) > LOG_FILE_MAX_SIZE:
-                backup = f"acceltrack_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                backup = f"frankentrack_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
                 os.rename(log_file, backup)
         except Exception:
             pass

@@ -1,5 +1,5 @@
 """
-System-wide configuration constants for acceltrack.
+System-wide configuration constants for frankentrack.
 
 These are DEFAULT values used for initialization. Many can be overridden
 at runtime via GUI controls and saved to config.cfg as user preferences.
@@ -68,6 +68,10 @@ DEFAULT_CAMERA_WIDTH = 640
 DEFAULT_CAMERA_HEIGHT = 480
 CAMERA_LOOP_DELAY = 0.02  # seconds between frame captures
 CAPTURE_RETRY_DELAY = 0.05  # seconds between camera open attempts
+# How long to wait for `cv2.VideoCapture` to report open before giving up.
+# This is polled with `cap.isOpened()`; the constructor itself may still
+# block in some backends, but this prevents long waits after construction.
+CAMERA_OPEN_TIMEOUT = 2.0  # seconds to wait for camera to open
 
 # Detection thresholds
 DEFAULT_DETECTION_THRESHOLD = 220  # 0-255 brightness threshold
@@ -102,7 +106,7 @@ THRESH_DEBOUNCE_MS = 150  # milliseconds to debounce threshold slider
 # ============================================================================
 # Logging
 # ============================================================================
-LOG_FILE_NAME = 'acceltrack.log'
+LOG_FILE_NAME = 'frankentrack.log'
 LOG_FILE_MAX_SIZE = 5 * 1024 * 1024  # 5 MB
 LOG_QUEUE_TIMEOUT = 0.5  # seconds
 

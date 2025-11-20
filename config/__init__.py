@@ -1,5 +1,5 @@
 """
-Configuration package for acceltrack.
+Configuration package for frankentrack.
 
 Provides system-wide constants and user preferences management.
 """

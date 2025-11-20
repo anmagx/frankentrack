@@ -34,6 +34,7 @@ from config.config import (
     FPS_REPORT_INTERVAL,
     QUEUE_PUT_TIMEOUT,
     CAMERA_LOOP_DELAY,
+    CAMERA_OPEN_TIMEOUT,
     CAPTURE_RETRY_DELAY
 )
 from util.error_utils import safe_queue_put, safe_queue_get, clamp, safe_float_convert
@@ -220,13 +221,35 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                 try:
                     log_info(logQueue, "Camera Worker", f"Opening camera {target_cam} at {frame_w}x{frame_h}")
                     cap = cv2.VideoCapture(target_cam, cv2.CAP_DSHOW)
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
+                    # Poll for `isOpened()` up to CAMERA_OPEN_TIMEOUT seconds. Some
+                    # backends may take a while to enumerate devices; this prevents
+                    # the worker from hanging indefinitely after the constructor.
                     try:
-                        if desired_fps is not None:
-                            cap.set(cv2.CAP_PROP_FPS, desired_fps)
+                        start_open = time.time()
+                        while not cap.isOpened() and (time.time() - start_open) < float(CAMERA_OPEN_TIMEOUT):
+                            time.sleep(0.05)
+                        if not cap.isOpened():
+                            log_error(logQueue, "Camera Worker", f"Timeout opening camera {target_cam}")
+                            try:
+                                cap.release()
+                            except Exception:
+                                pass
+                            cap = None
+                        else:
+                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
+                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
+                            try:
+                                if desired_fps is not None:
+                                    cap.set(cv2.CAP_PROP_FPS, desired_fps)
+                            except Exception:
+                                pass
                     except Exception:
-                        pass
+                        # If the polling itself fails, ensure we release and continue
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        cap = None
                 except Exception as e:
                     log_error(logQueue, "Camera Worker", f"Failed to open camera {target_cam}: {e}")
                     cap = None
