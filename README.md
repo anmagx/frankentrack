@@ -63,6 +63,10 @@ Required data structure:
 
 During tests, message rates of 120hz were absolutely fine, and you could probably go faster than that. However that might require adjusting the queue sizes in config.py, depending on performance.
 
+Camera: 
+The PS3 Eye camera is known to be tricky to utilize in python. The libusb-driver package for the PS3 eye can be used in combination with PS3EyeDirectShow, but it's limited to work in 32Bit only. 
+The project could possibly support direct communication with the camera using PyUSB and a bit of C-Code, but I need to do more research into this. Perhaps looking at pseyepy might be another option. 
+
 ## Frequently asked Questions (FAQ)
 
 ### Why?
