@@ -26,6 +26,7 @@ MANIFEST
 # Virtual Environment
 venv/
 .venv/
+.venv-32/
 env/
 ENV/
 env.bak/
@@ -40,6 +41,7 @@ venv.bak/
 .project
 .pydevproject
 .settings/
+frankentrack.code-workspace
 
 # OS
 .DS_Store
