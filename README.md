@@ -12,7 +12,9 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 ## Demonstration Video
 
-[https://www.youtube.com/watch?v=8bVocOTLqhI]
+[]
+
+[![Everything Is AWESOME](https://img.youtube.com/watch?v=8bVocOTLqhI/0.jpg)](https://www.youtube.com/watch?v=8bVocOTLqhI "Everything Is AWESOME")
 
 ## Project state
 
