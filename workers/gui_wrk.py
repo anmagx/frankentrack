@@ -49,6 +49,7 @@ All panels implement get_prefs() and set_prefs() for persistence.
 import tkinter as tk
 from tkinter import ttk
 import time
+import os
 from queue import Empty
 
 from config.config import (
@@ -161,6 +162,14 @@ class AppV2(tk.Tk):
         super().__init__()
         self.title("frankentrack v.01 GUI")
         self.resizable(False, False)
+        
+        # Set window icon
+        try:
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'img', 'icon.ico')
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+        except Exception:
+            pass  # Silently fail if icon not found
         
         # Store queues for communication with workers
         self.messageQueue = messageQueue

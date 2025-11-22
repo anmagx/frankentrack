@@ -78,7 +78,7 @@ if errorlevel 2 goto :skip_shortcut
 
 REM Create desktop shortcut using PowerShell
 echo Creating desktop shortcut...
-powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Frankentrack.lnk'); $Shortcut.TargetPath = '%LAUNCH_SCRIPT%'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\SHELL32.dll,21'; $Shortcut.Description = 'Launch Frankentrack Headtracker'; $Shortcut.Save()"
+powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Frankentrack.lnk'); $Shortcut.TargetPath = '%LAUNCH_SCRIPT%'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\img\icon.ico'; $Shortcut.Description = 'Launch Frankentrack Headtracker'; $Shortcut.Save()"
 if errorlevel 1 (
     echo WARNING: Failed to create desktop shortcut
 ) else (
