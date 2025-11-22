@@ -1,6 +1,7 @@
 # Frankentrack
+![alt text](img/gui_active.png)
 
-OpenTrack-Compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
+OpenTrack-compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
 Supports single-point IR-LED tracking for X/Y movement estimation. 
 
 ## What is Frankentrack? 
@@ -10,7 +11,8 @@ Frankentrack is the product of unholy union of IMU sensor data fusion and (optio
 Since it only processes data coming in over serial, a wide range of sensors and microcontrollers are supported. The only prerequisite is that incoming data must be structured in csv-style for parsing. More on that below. 
 
 ## Demonstration Video
-(link video here)
+
+[https://www.youtube.com/watch?v=8bVocOTLqhI]
 
 ## Project state
 
@@ -171,3 +173,6 @@ In practice during normal play, I only had this happen when I tried to provoke i
 The calibration phase is very important and must be run at each program startup. The sensor must be upright and relatively level to give precise measurements. While you could calibrate while wearing your headset, you would need to be incredibly still. I would suggest setting your system down for the short startup. 
 
 Drift may be influenced by external factors like temperature or humidity, so the program allows recalibration at any time. After very long periods, the offsets internal to the sensor could be out of sync with changed external factors, requiring a sensor reboot. This of course entirely depends on how the sensor is programmed. 
+
+
+[https://www.youtube.com/watch?v=8bVocOTLqhI]: https://www.youtube.com/watch?v=8bVocOTLqhI
