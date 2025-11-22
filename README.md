@@ -34,7 +34,7 @@ Nonetheless, thank you Claude.
 * 2-step drift correction procedure for stable viewing angles
 * Single brightspot optical tracking using a webcam to produce X/Y movement
 * UDP sender for sending into opentrack
-* Central log file
+* Central log file (Still work in progress)
 * Multiprocess architecture using queues for IPC
 
 ### Configuration
@@ -69,7 +69,7 @@ Nonetheless, thank you Claude.
 
 **Software**
 
-Python
+Python (3.8 - 3.13.9)
 * OpenCV (for camera handling)
 * Pillow (camera preview handling)
 * pyserial (serial reading)
