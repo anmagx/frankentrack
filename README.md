@@ -14,7 +14,7 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 Hardware setup: 
 
-<img src="image.png" alt="Hardware setup" width="400"/>
+<img src="/img/image.png" alt="Hardware setup" width="400"/>
 
 
 Watch the demonstration video here. (Youtube)<br>

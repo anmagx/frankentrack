@@ -7,10 +7,10 @@
   - [x] Project description and features
   - [x] Hardware requirements (IMU model, Arduino, camera specs)
   - [x] Installation instructions (including Python 3.8-3.13 requirement)
-  - [ ] Quick start guide
+  - [x] Quick start guide
   - [x] Serial data format specification
-  - [ ] Configuration guide
-  - [ ] Troubleshooting section
+  - [x] Configuration guide
+  - [x] Troubleshooting section
 - [x] Add LICENSE file (MIT recommended - matches your open collaboration goals)
 - [x] Create .gitignore file
 - [ ] Write ARCHITECTURE.md
@@ -35,8 +35,7 @@
   - [x] Prevent race condition in signal handler
   - [x] Add threading.Lock() for stop_workers()
 - [x] Add camera enumeration timeout (currently can hang on dead cameras)
-  - [ ] Add timeout parameter to cv2.VideoCapture() calls
-  - [ ] Add overall enumeration timeout (e.g., 10 seconds max)
+  - [x] Add timeout parameter to cv2.VideoCapture() calls
 
 ### Testing
 - [x] Test installation on clean Python environment
