@@ -12,9 +12,7 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 ## Demonstration Video
 
-[]
-
-[![Everything Is AWESOME](https://img.youtube.com/watch?v=8bVocOTLqhI/0.jpg)](https://www.youtube.com/watch?v=8bVocOTLqhI "Everything Is AWESOME")
+<iframe width="560" height="315" src="https://www.youtube.com/watch?v=8bVocOTLqhI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 ## Project state
 
