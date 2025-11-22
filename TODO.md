@@ -92,8 +92,8 @@
 - [ ] Add integration tests
 - [ ] Set up continuous integration (GitHub Actions)
 - [ ] Add performance benchmarks
-- [ ] Test on Linux
-- [ ] Test on macOS
+- [ ] Test on Linux (not yet)
+- [ ] Test on macOS (not yet, maybe never)
 
 ### Documentation
 - [ ] Create video tutorial/demo
