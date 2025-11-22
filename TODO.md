@@ -73,7 +73,7 @@
 
 ### Code Quality
 - [x] Add camera enumeration timeout (1s per camera)
-- [ ] Add camera enumeration on first startup
+- [x] Add camera enumeration on first startup
 - [x] Review all TODO comments in code
 - [ ] Add type hints to critical functions
 - [ ] Run linter (pylint/flake8) and fix issues
