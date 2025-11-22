@@ -12,7 +12,11 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 ## Demonstration Video
 
-<iframe width="560" height="315" src="https://www.youtube.com/watch?v=8bVocOTLqhI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+[![Watch the video](https://img.youtube.com/vi/APOPm01BVrk/hqdefault.jpg)](https://www.youtube.com/embed/APOPm01BVrk)
+
+[<img src="https://img.youtube.com/vi/APOPm01BVrk/hqdefault.jpg" width="600" height="300"
+/>](https://www.youtube.com/embed/APOPm01BVrk)
+
 
 ## Project state
 
