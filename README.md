@@ -189,3 +189,8 @@ Drift may be influenced by external factors like temperature or humidity, so the
 
 
 [https://www.youtube.com/watch?v=8bVocOTLqhI]: https://www.youtube.com/watch?v=8bVocOTLqhI
+
+## Support
+
+Want to buy me a coffee?<br>
+`https://ko-fi.com/anmagx#`
