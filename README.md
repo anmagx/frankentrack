@@ -12,10 +12,7 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 ## Demonstration Video
 
-[![Watch the video](https://img.youtube.com/vi/APOPm01BVrk/hqdefault.jpg)](https://www.youtube.com/embed/APOPm01BVrk)
-
-[<img src="https://img.youtube.com/vi/APOPm01BVrk/hqdefault.jpg" width="600" height="300"
-/>](https://www.youtube.com/embed/APOPm01BVrk)
+[![Watch the video](https://img.youtube.com/vi/8bVocOTLqhI/hqdefault.jpg)](https://www.youtube.com/embed/8bVocOTLqhI)
 
 
 ## Project state
