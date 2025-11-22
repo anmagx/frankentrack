@@ -80,3 +80,5 @@ dmypy.json
 *.tmp
 *.bak
 test_output/
+launch_frankentrack.bat
+TODO.md

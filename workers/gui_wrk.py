@@ -202,8 +202,19 @@ class AppV2(tk.Tk):
         # Preferences manager handles saving/loading user settings
         self.prefs_manager = PreferencesManager()
         
+        # build UI
         self._build_layout()
+        # load user preferences
         self._load_preferences()
+
+        # If no user prefs/config file exists, auto-start camera enumeration once
+        try:
+            # Use PreferencesManager.exists() to determine if saved prefs exist.
+            # Schedule enumeration when the GUI becomes idle (no fixed delay).
+            if not self.prefs_manager.exists():
+                self.after_idle(self.camera_panel._on_enumerate_clicked)
+        except Exception:
+            pass
         
         # Start polling queues after GUI is built
         self.after(self.poll_ms, self._poll_queues)
