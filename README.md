@@ -10,8 +10,16 @@ Frankentrack is the product of unholy union of IMU sensor data fusion and (optio
 
 Since it only processes data coming in over serial, a wide range of sensors and microcontrollers are supported. The only prerequisite is that incoming data must be structured in csv-style for parsing. More on that below. 
 
-## Demonstration Video
+## Demonstration
 
+Hardware setup: 
+
+<img src="image.png" alt="Hardware setup" width="400"/>
+<br><br>
+
+
+Watch the demonstration video here. (Youtube)<br>
+https://www.youtube.com/watch?v=8bVocOTLqhI
 
 [![Watch the video](https://img.youtube.com/vi/8bVocOTLqhI/hqdefault.jpg)](https://www.youtube.com/embed/8bVocOTLqhI)
 
@@ -20,7 +28,7 @@ Since it only processes data coming in over serial, a wide range of sensors and 
 
 This is an early release and there might be bugs present. Contributions are welcome and will be welcomed with warm thanks. 
 
-I also want to be transparent about the fact that this project has seen heavy AI assistant usage. While I tried to make smart decisions, I am happy to learn if someone human knows better. 
+I also want to be transparent about the fact that this a hobby project, and has seen heavy AI assistant usage. I tried to keep coding style and architecture consistent and sensible, but am happy to learn if someone human knows better! 
 
 Nonetheless, thank you Claude. 
 
@@ -47,6 +55,8 @@ Nonetheless, thank you Claude.
 
 ## Installation
 
+You can use the included `install.bat` - it creates the venv for you, installs requirements.txt, and creates a desktop shortcut. 
+
 * Clone repository<br>
 `git clone https://github.com/anmagx/frankentrack`
 
@@ -68,6 +78,8 @@ Nonetheless, thank you Claude.
 ## Requirements
 
 **Software**
+
+Currently Windows only.
 
 Python (3.8 - 3.13.9)
 * OpenCV (for camera handling)
