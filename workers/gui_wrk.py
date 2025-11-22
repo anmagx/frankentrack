@@ -163,6 +163,14 @@ class AppV2(tk.Tk):
         self.title("frankentrack v.01 GUI")
         self.resizable(False, False)
         
+        # Set App User Model ID for Windows taskbar icon
+        try:
+            import ctypes
+            myappid = 'anmagx.frankentrack.headtracker.01'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+        
         # Set window icon
         try:
             icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'img', 'icon.ico')
