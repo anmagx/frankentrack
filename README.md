@@ -9,6 +9,9 @@ Frankentrack is the product of unholy union of IMU sensor data fusion and (optio
 
 Since it only processes data coming in over serial, a wide range of sensors and microcontrollers are supported. The only prerequisite is that incoming data must be structured in csv-style for parsing. More on that below. 
 
+## Demonstration Video
+(link video here)
+
 ## Project state
 
 This is an early release and there might be bugs present. Contributions are welcome and will be welcomed with warm thanks. 
@@ -25,8 +28,8 @@ Nonetheless, thank you Claude.
 * Serial reader for receiving csv-structured IMU Sensor Data
 * Sensor fusion using complementary filter to produce pitch/roll/yaw angles
 * 2-step drift correction procedure for stable viewing angles
-* Single point optical tracking using a webcam to produce X/Y movement
-* UDP sender for sending the values into opentrack
+* Single brightspot optical tracking using a webcam to produce X/Y movement
+* UDP sender for sending into opentrack
 * Central log file
 * Multiprocess architecture using queues for IPC
 
@@ -39,9 +42,24 @@ Nonetheless, thank you Claude.
 * Second step: Active, subtle drift correction while inside configurable area (effectively recentering)
 
 ## Installation
-* Clone repository
-* Create a venv (Optional, but recommended) 
-* `python -m pip install requirements.txt`
+
+* Clone repository<br>
+`git clone https://github.com/anmagx/frankentrack`
+
+* Change into directory<br>
+`cd frankentrack`
+
+* Create .venv (optional, but recommended)<br>
+`python -m venv .venv`
+
+* Activate virtual environment<br>
+`.venv\Scripts\activate`
+
+* Install requirements.txt<br>
+`python -m pip install -r requirements.txt`
+
+* Launch program<br>
+`python frankentrack.py`
 
 ## Requirements
 
@@ -55,7 +73,12 @@ Python
 
 **Hardware**
 
-Basically anything that will give you csv-structured data over a serial port will work. The outlined example assumes an Arduino Nano (connected via USB-C) and an MPU6500 IMU communicating over Serial at 250000 Baud. 
+Basically anything that will give you csv-structured data over a serial port will work. The setup in the video uses the following components: 
+
+* Arduino Nano
+* MPU6500
+* Single 940nm IR-LED (wired to 5V using 150Ohm Resistor)
+* PS3 Eye camera
 
 Required data structure:
 
@@ -63,9 +86,20 @@ Required data structure:
 
 During tests, message rates of 120hz were absolutely fine, and you could probably go faster than that. However that might require adjusting the queue sizes in config.py, depending on performance.
 
-Camera: 
-The PS3 Eye camera is known to be tricky to utilize in python. The libusb-driver package for the PS3 eye can be used in combination with PS3EyeDirectShow, but it's limited to work in 32Bit only. 
-The project could possibly support direct communication with the camera using PyUSB and a bit of C-Code, but I need to do more research into this. Perhaps looking at pseyepy might be another option. 
+**Camera Limitations**
+
+The PS3 Eye camera is known to be tricky to utilize in python. The libusb-driver package for the PS3 eye can be used with opencv, but won't read frames beyond 60FPS. Perhaps the official CL Driver supports more, but as it's commercial, it is not used in this project. 
+
+## Usage
+
+Open the included arduino sketch and flash it to your Arduino Nano. Wire up your sensor as an I2C device and then connect via USB-C. 
+(Optional: If you want to power your LED for Position tracking, the designated pin is D3.)
+
+In the gui, set your preferred serial port and baud rate and click 'Start'. Make sure your device is sitting still and level.
+
+After a short calibration period the sensor data will be available in the gui. You should next start the gyro bias calibration. After this has finished, the sensor is safe to be moved. If you fix it to your headset, you can recenter your view now and start the UDP sender (on whichever port you've set opentrack to receive in.)
+
+When in game, you should set your preferred drift correction angle with the slider in the gui. More on that setting below. 
 
 ## Frequently asked Questions (FAQ)
 
@@ -108,6 +142,7 @@ Adding a second LED and tracking the midpoint between the two can somewhat remed
 ### How does it functionally compare to a traditional 3-point tracking solution? 
 
 Just from my experience, using completely self-built tracking hardware, there are some considerations and tradeoffs. 
+
 
 **Responsiveness**
 

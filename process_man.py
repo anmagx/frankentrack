@@ -1,4 +1,17 @@
 # process_man.py
+"""Process manager: create and manage worker processes and inter-process queues.
+
+This module exposes `ProcessHandler`, a convenience class that initializes
+the multiprocessing queues, starts worker processes (GUI, Serial, Fusion,
+UDP, Camera), and provides a safe shutdown path. The manager also runs a
+background log writer thread that drains `logQueue` and writes messages to
+`LOG_FILE_NAME`.
+
+The implementation focuses on robustness: queues have limited size, workers
+are started as separate processes, and `stop_workers()` uses a shutdown
+lock to avoid race conditions from repeated signals.
+"""
+
 from multiprocessing import Process, Queue, Event
 import signal
 import sys
@@ -17,7 +30,16 @@ from config.config import (
     WORKER_JOIN_TIMEOUT
 )
 
-class ProcessHandler: 
+class ProcessHandler:
+    """Manager for application worker processes and shared queues.
+
+    Responsibilities:
+    - Create and own all multiprocessing queues and the global stop event.
+    - Start worker processes with the correct queue bindings.
+    - Provide `stop_workers()` that signals shutdown and cleans up processes.
+    - Run a background log writer thread that persists log entries to disk.
+    """
+
     def __init__(self):
         ## Init Queues (use config constants)
         self.serialQueue = Queue(maxsize=QUEUE_SIZE_DATA)
@@ -60,7 +82,16 @@ class ProcessHandler:
         self._stopping = False
     
     def _log_writer(self):
-        """Background thread that writes log messages to file."""
+        """Background thread that writes log messages from `logQueue` to file.
+
+        This thread runs in the main process (not a worker) and listens for
+        tuples of the form `(level, worker_name, message)` put into
+        `self.logQueue`. Entries are timestamped and appended to `LOG_FILE_NAME`.
+
+        The writer attempts a simple log rotation based on `LOG_FILE_MAX_SIZE`.
+        It is robust to transient IO errors and will silently drop malformed
+        entries to avoid crashing the manager during shutdown.
+        """
         from datetime import datetime
         from queue import Empty
         
@@ -96,13 +127,31 @@ class ProcessHandler:
             print(f"[ProcessHandler] Log writer error: {e}")
     
     def _signal_handler(self, signum, frame):
-        """Handle Ctrl+C and termination signals"""
+        """Handle OS termination signals (SIGINT, SIGTERM).
+
+        This handler delegates to `stop_workers()` to perform an orderly
+        shutdown and then exits the process. The actual shutdown sequence is
+        guarded by a lock to avoid concurrent invocations from repeated
+        signals.
+        """
         print("\n[ProcessHandler] Shutdown signal received, stopping workers...")
         # Let stop_workers handle re-entrancy via the shutdown lock
-        self.stop_workers()
+        try:
+            self.stop_workers()
+        except Exception:
+            # Ensure we still exit even if shutdown encountered issues
+            pass
         sys.exit(0)
     
     def start_workers(self):
+        """Create and start all application worker processes.
+
+        Each worker is started as a separate `multiprocessing.Process` with
+        queues wired according to the system architecture. This method should
+        be called once from the main entrypoint. It intentionally imports
+        worker modules here to avoid circular import problems at module
+        import time.
+        """
         print("[ProcessHandler] Starting workers...")
         
         ## Import worker target here to avoid circular import
@@ -172,7 +221,18 @@ class ProcessHandler:
         print("[ProcessHandler] All workers started.")
         
     def stop_workers(self):
-        """Stop all worker processes"""
+        """Stop and cleanup all worker processes.
+
+        The shutdown flow is:
+        - Acquire shutdown lock to prevent re-entrancy.
+        - Set the global `stop_event` so workers can exit cleanly.
+        - Allow a brief grace period for processes to exit.
+        - Force-terminate remaining alive processes and join them with a
+          timeout (`WORKER_JOIN_TIMEOUT`).
+
+        This method is safe to call multiple times; concurrent calls will be
+        ignored while a shutdown is in progress.
+        """
         # Prevent concurrent shutdown attempts
         acquired = self._shutdown_lock.acquire(blocking=False)
         if not acquired:

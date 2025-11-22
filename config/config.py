@@ -38,7 +38,7 @@ ACCEL_THRESHOLD = 0.15  # g-units: threshold for stationary detection
 DEFAULT_CENTER_THRESHOLD = 5.0  # degrees: threshold for "near center" detection
 ALPHA_YAW = 0.98   # Complementary filter alpha for yaw
 ALPHA_ROLL = 0.98  # Complementary filter alpha for roll
-ALPHA_PITCH = 0.99 # Complementary filter alpha for pitch
+ALPHA_PITCH = 0.98 # Complementary filter alpha for pitch
 ALPHA_DRIFT_CORRECTION = 0.99  # Alpha for drift correction when stationary
 
 # Time delta validation
@@ -57,7 +57,7 @@ STATIONARY_DEBOUNCE_S = 0.15
 # ============================================================================
 # Number of gyro gz samples to collect at startup for initial bias calibration.
 # Set to 0 to disable startup calibration and rely solely on online estimator.
-GYRO_BIAS_CAL_SAMPLES = 200
+GYRO_BIAS_CAL_SAMPLES = 400
 
 # ============================================================================
 # Camera / Computer Vision

@@ -5,8 +5,8 @@
 ### Documentation
 - [x] Write README.md
   - [x] Project description and features
-  - [ ] Hardware requirements (IMU model, Arduino, camera specs)
-  - [ ] Installation instructions (including Python 3.8-3.13 requirement)
+  - [x] Hardware requirements (IMU model, Arduino, camera specs)
+  - [x] Installation instructions (including Python 3.8-3.13 requirement)
   - [ ] Quick start guide
   - [x] Serial data format specification
   - [ ] Configuration guide
@@ -34,17 +34,17 @@
 - [x] Add shutdown lock to ProcessHandler (process_man.py)
   - [x] Prevent race condition in signal handler
   - [x] Add threading.Lock() for stop_workers()
-- [ ] Add camera enumeration timeout (currently can hang on dead cameras)
+- [x] Add camera enumeration timeout (currently can hang on dead cameras)
   - [ ] Add timeout parameter to cv2.VideoCapture() calls
   - [ ] Add overall enumeration timeout (e.g., 10 seconds max)
 
 ### Testing
-- [ ] Test installation on clean Python environment
-- [ ] Test on Windows (current platform)
-- [ ] Test with real hardware (IMU + camera)
+- [x] Test installation on clean Python environment
+- [x] Test on Windows (current platform)
+- [x] Test with real hardware (IMU + camera)
 - [ ] Test without hardware (mock data mode)
-- [ ] Verify all panels save/load preferences correctly
-- [ ] Test UDP output with OpenTrack
+- [x] Verify all panels save/load preferences correctly
+- [x] Test UDP output with OpenTrack
 
 ### Packaging
 - [x] Create requirements.txt with Python 3.13 compatible versions:
@@ -71,11 +71,10 @@
 - [ ] Document configuration file format (config.cfg)
 - [ ] Create example configuration files
 - [ ] Add screenshots to README
-- [ ] Document expected IMU models/compatibility
 
 ### Code Quality
-- [ ] Add camera enumeration timeout (1s per camera)
-- [ ] Review all TODO comments in code
+- [x] Add camera enumeration timeout (1s per camera)
+- [x] Review all TODO comments in code
 - [ ] Add type hints to critical functions
 - [ ] Run linter (pylint/flake8) and fix issues
 
@@ -100,7 +99,7 @@
 ### Documentation
 - [ ] Create video tutorial/demo
 - [ ] Write contributor guidelines (CONTRIBUTING.md)
-- [ ] Add FAQ section
+- [x] Add FAQ section
 - [ ] Create wiki with detailed guides
 - [ ] Document supported hardware list
 
@@ -118,7 +117,7 @@
 1. **Phase 1 (Today/Tomorrow - 2-4 hours)**
    - [x] Create .gitignore
    - [x] Add MIT LICENSE file
-   - [ ] Write basic README.md (use template from review)
+   - [x] Write basic README.md (use template from review)
    - [x] Decide on GUI version (keep gui_wrk_v2.py, remove old?)
    - [x] Create requirements.txt
 
@@ -126,7 +125,7 @@
    - [x] Fix hardcoded values
    - [x] Add shutdown lock
    - [x] Add missing __init__.py files
-   - [ ] Test on clean environment
+   - [x] Test on clean environment
 
 3. **Phase 3 (Next Week - 2-4 hours)**
    - [ ] Write ARCHITECTURE.md
