@@ -190,6 +190,19 @@ Drift may be influenced by external factors like temperature or humidity, so the
 
 [https://www.youtube.com/watch?v=8bVocOTLqhI]: https://www.youtube.com/watch?v=8bVocOTLqhI
 
+## License
+
+This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for details.
+
+### Third-Party Components
+
+This software incorporates several third-party components with their own licenses:
+
+- **pseyepy**: Apache License 2.0 (Copyright 2017 Ben Deverett) - Modified for Windows compatibility
+- **libusb-1.0**: LGPL v2.1 - Dynamically linked for USB device communication
+
+See [NOTICE](NOTICE) for complete attribution and license information.
+
 ## Support
 
 Want to buy me a coffee?<br>
