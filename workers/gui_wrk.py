@@ -160,7 +160,7 @@ class AppV2(tk.Tk):
             Polling interval in milliseconds (default: from config)
         """
         super().__init__()
-        self.title("frankentrack v.01 GUI")
+        self.title("frankentrack v0.11-alpha GUI")
         self.resizable(False, False)
         
         # Set App User Model ID for Windows taskbar icon
