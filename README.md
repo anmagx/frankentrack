@@ -40,6 +40,7 @@ Nonetheless, thank you Claude.
 * Sensor fusion using complementary filter to produce pitch/roll/yaw angles
 * 2-step drift correction procedure for stable viewing angles
 * Single brightspot optical tracking using a webcam to produce X/Y movement
+* General webcam support with openCV, pseyepy (PS3Eye) with basic webcam settings (gain, exposure)
 * UDP sender for sending into opentrack
 * Central log file (Still work in progress)
 * Multiprocess architecture using queues for IPC
