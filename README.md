@@ -1,5 +1,5 @@
 # Frankentrack
-![alt text](img/gui_active.png)
+![gui](img/gui_active_11.png)
 
 OpenTrack-compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
 Supports single-point IR-LED tracking for X/Y movement estimation. 
