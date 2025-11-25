@@ -21,7 +21,7 @@ SERIAL_TIMEOUT = 1.0  # seconds
 QUEUE_SIZE_DATA = 100  # For data pipelines (serial, euler, translation)
 QUEUE_SIZE_DISPLAY = 30  # For display-only queues
 QUEUE_SIZE_CONTROL = 10  # For control command queues
-QUEUE_SIZE_PREVIEW = 2  # For camera preview (intentionally small)
+QUEUE_SIZE_PREVIEW = 6  # For camera preview (small buffer to reduce dropped frames)
 
 # ============================================================================
 # Timeout Values

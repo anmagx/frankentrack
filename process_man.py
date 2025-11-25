@@ -217,6 +217,11 @@ class ProcessHandler:
         )
         camera_worker.start()
         self.workers.append(camera_worker)
+        # Print process details for debugging worker startup
+        try:
+            print(f"[ProcessHandler] Started CameraWorker pid={camera_worker.pid} alive={camera_worker.is_alive()}")
+        except Exception:
+            pass
 
         print("[ProcessHandler] All workers started.")
         
