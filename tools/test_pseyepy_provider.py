@@ -1,4 +1,7 @@
 # Quick test for PSEye provider
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from workers.cameraProvider_pseyepy import PSEyeProvider
 import time
 
