@@ -56,8 +56,20 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo Dependencies installed successfully!
+
+echo Fetching and installing pseyepy from github...
+"%INSTALL_DIR%\.venv\Scripts\python.exe" -m pip install git+https://github.com/bensondaled/pseyepy.git
+if errorlevel 1 (
+    echo ERROR: Failed to install pseyepy
+    echo This may be due to missing system dependencies or git not being available
+    echo Try installing Microsoft Visual C++ Redistributable and Git if on Windows
+    pause
+    exit /b 1
+)
+
+echo pseyepy installed successfully!
 echo.
+
 
 REM Create a launch script
 echo Creating launch script...

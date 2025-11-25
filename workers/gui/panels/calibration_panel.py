@@ -9,6 +9,7 @@ from tkinter import ttk
 
 from config.config import (
     DEFAULT_CENTER_THRESHOLD,
+    THRESH_DEBOUNCE_MS,
     QUEUE_PUT_TIMEOUT,
 )
 from util.error_utils import safe_queue_put
@@ -31,6 +32,8 @@ class CalibrationPanel(ttk.LabelFrame):
         self.drift_angle_display = tk.StringVar(value=f"{DEFAULT_CENTER_THRESHOLD:.1f}")
         # Status indicator for gyro calibration
         self.calib_status_var = tk.StringVar(value="Gyro: Not calibrated")
+        # Debounce job id for sending drift angle updates
+        self._drift_send_job = None
 
         self._build_ui()
 
@@ -83,12 +86,18 @@ class CalibrationPanel(ttk.LabelFrame):
             v = float(val)
         except Exception:
             v = 0.0
-        self.drift_angle_display.set(f"{v:.1f}")
 
-        # forward to fusion worker
-        if not safe_queue_put(self.control_queue, ('set_center_threshold', float(v)), timeout=QUEUE_PUT_TIMEOUT):
-            if self.message_callback:
-                self.message_callback("Failed to send drift angle update")
+        # Quantize to 0.1 and update display immediately
+        vq = round(v * 10.0) / 10.0
+        self.drift_angle_display.set(f"{vq:.1f}")
+
+        # Debounce sending updates to avoid flooding the control queue
+        if self._drift_send_job is not None:
+            try:
+                self.after_cancel(self._drift_send_job)
+            except Exception:
+                pass
+        self._drift_send_job = self.after(THRESH_DEBOUNCE_MS, lambda: self._apply_drift_angle(vq))
 
     def _on_reset(self):
         if not safe_queue_put(self.control_queue, 'reset', timeout=QUEUE_PUT_TIMEOUT):
@@ -124,7 +133,12 @@ class CalibrationPanel(ttk.LabelFrame):
             pass
 
     def get_prefs(self):
-        return {'drift_angle': str(self.drift_angle_var.get())}
+        # Persist the drift angle to one decimal place
+        try:
+            v = round(float(self.drift_angle_var.get()) * 10.0) / 10.0
+            return {'drift_angle': f"{v:.1f}"}
+        except Exception:
+            return {'drift_angle': f"{DEFAULT_CENTER_THRESHOLD:.1f}"}
 
     def set_prefs(self, prefs):
         if prefs is None:
@@ -132,10 +146,12 @@ class CalibrationPanel(ttk.LabelFrame):
         if 'drift_angle' in prefs and prefs['drift_angle']:
             try:
                 angle = float(prefs['drift_angle'])
+                # Quantize to 0.1
+                angle = round(angle * 10.0) / 10.0
                 self.drift_angle_var.set(angle)
                 self.drift_angle_display.set(f"{angle:.1f}")
                 if self.control_queue:
-                    safe_queue_put(self.control_queue, ('set_center_threshold', angle), timeout=QUEUE_PUT_TIMEOUT)
+                    safe_queue_put(self.control_queue, ('set_center_threshold', float(angle)), timeout=QUEUE_PUT_TIMEOUT)
             except Exception:
                 pass
 
@@ -146,9 +162,22 @@ class CalibrationPanel(ttk.LabelFrame):
         try:
             angle = float(angle)
             angle = max(0.0, min(25.0, angle))
+            # Quantize to 0.1 when programmatically setting
+            angle = round(angle * 10.0) / 10.0
             self.drift_angle_var.set(angle)
             self.drift_angle_display.set(f"{angle:.1f}")
             if self.control_queue:
-                safe_queue_put(self.control_queue, ('set_center_threshold', angle), timeout=QUEUE_PUT_TIMEOUT)
+                safe_queue_put(self.control_queue, ('set_center_threshold', float(angle)), timeout=QUEUE_PUT_TIMEOUT)
+        except Exception:
+            pass
+
+    def _apply_drift_angle(self, vq: float):
+        """Send the quantized drift angle to the control queue (debounced)."""
+        try:
+            self._drift_send_job = None
+            if self.control_queue:
+                if not safe_queue_put(self.control_queue, ('set_center_threshold', float(vq)), timeout=QUEUE_PUT_TIMEOUT):
+                    if self.message_callback:
+                        self.message_callback("Failed to send drift angle update")
         except Exception:
             pass

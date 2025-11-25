@@ -10,6 +10,7 @@ Command protocol on cameraControlQueue:
   ('stop_pos',)
   ('set_cam', cam_index)
   ('calibrate',)
+    ('set_backend', backend_key)  # 'openCV' or 'pseyepy'
 
 This worker runs as a separate process. It only sends primitive data (lists
 and bytes) across multiprocessing queues; no Tk objects are created here.
@@ -84,7 +85,12 @@ def run_worker(translationQueue, translationDisplayQueue, cameraControlQueue, st
     """Entry point for Process spawn."""
     from util.log_utils import log_info, log_error
     
+    # Announce startup both to log queue and stdout so main process can see worker started
     log_info(logQueue, "Camera Worker", "Starting camera worker")
+    try:
+        print("[Camera Worker] Starting camera worker...")
+    except Exception:
+        pass
     
     try:
         tracking_thread(translationQueue, translationDisplayQueue, stop_event, statusQueue=statusQueue, logQueue=logQueue, cam_index=cam_index, thresh_value=thresh_value, preview_queue=cameraPreviewQueue, control_queue=cameraControlQueue)
@@ -114,10 +120,11 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
     """
     from util.log_utils import log_info, log_error
     
-    cap = None
+    provider = None
     want_preview = False
     tracking = False
     target_cam = int(cam_index)
+    backend = 'openCV'  # default backend; can be set to 'pseyepy'
 
     # smoothed outputs (using LOWPASS_ALPHA from config)
     sx = LowPass(LOWPASS_ALPHA, 0.0)
@@ -146,6 +153,11 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
             if control_queue is not None:
                 cmd = safe_queue_get(control_queue, timeout=0.0, default=None)
                 while cmd is not None:
+                    try:
+                        log_info(logQueue, "Camera Worker", f"Control command received: {cmd}")
+                    except Exception:
+                        pass
+                    # (debug prints removed) command is logged via log_info above
                     if isinstance(cmd, (list, tuple)) and len(cmd) >= 1:
                         if cmd[0] == 'preview_on':
                             want_preview = True
@@ -175,41 +187,83 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                                                         min_val=120.0, max_val=4096.0)
                             frame_h = int(frame_h)
                             
-                            # if capture already open, try to apply settings immediately
-                            if cap is not None:
+                            # if provider already open, try to apply settings immediately
+                            if provider is not None:
                                 try:
-                                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
-                                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
-                                    if desired_fps is not None:
-                                        cap.set(cv2.CAP_PROP_FPS, desired_fps)
+                                    try:
+                                        provider.set_params(frame_w, frame_h, desired_fps)
+                                    except Exception:
+                                        # If provider cannot apply params in-place, recreate it next loop
+                                        try:
+                                            provider.close()
+                                        except Exception:
+                                            pass
+                                        provider = None
                                 except Exception:
                                     pass
                         elif cmd[0] == 'set_cam' and len(cmd) >= 2:
                             try:
                                 target_cam = int(cmd[1])
                                 # reopen capture on next loop
-                                if cap is not None:
+                                if provider is not None:
                                     try:
-                                        cap.release()
+                                        provider.close()
                                     except Exception:
                                         pass
-                                    cap = None
+                                    provider = None
                             except (ValueError, TypeError):
+                                pass
+                        elif cmd[0] == 'set_backend' and len(cmd) >= 2:
+                            # ('set_backend', 'pseyepy'|'openCV' or display names)
+                            try:
+                                val = str(cmd[1])
+                                new_backend = 'pseyepy' if 'pseyepy' in val.lower() else 'openCV'
+                                if new_backend != backend:
+                                    backend = new_backend
+                                    # close existing capture so it will be reopened with new backend
+                                    if provider is not None:
+                                        try:
+                                            provider.close()
+                                        except Exception:
+                                            pass
+                                        provider = None
+                                    try:
+                                        log_info(logQueue, "Camera Worker", f"Backend switched to {backend}")
+                                    except Exception:
+                                        pass
+                                    # (debug print removed)
+                            except Exception:
                                 pass
                         elif cmd[0] == 'calibrate':
                             # future: handle calibrate
                             pass
+                        elif cmd[0] == 'set_cam_setting' and len(cmd) >= 3:
+                            # ('set_cam_setting', name, value)
+                            try:
+                                name = str(cmd[1])
+                                val = cmd[2]
+                                # If provider already open, try to apply immediately
+                                if provider is not None and hasattr(provider, 'set_setting'):
+                                    try:
+                                        provider.set_setting(name, val)
+                                    except Exception:
+                                        pass
+                                else:
+                                    # If no provider yet, ignore or remember for later (not implemented)
+                                    pass
+                            except Exception:
+                                pass
                     
                     # Get next command
                     cmd = safe_queue_get(control_queue, timeout=0.0, default=None)
 
             # If neither preview nor tracking requested, release the capture device to reset state
-            if not want_preview and not tracking and cap is not None:
+            if not want_preview and not tracking and provider is not None:
                 try:
-                    cap.release()
+                    provider.close()
                 except Exception:
                     pass
-                cap = None
+                provider = None
                 # notify UI that camera is idle (0 fps)
                 try:
                     safe_queue_put(statusQueue, ('cam_fps', 0.0), timeout=QUEUE_PUT_TIMEOUT)
@@ -217,57 +271,61 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                     pass
 
             # ensure capture open if preview or tracking required
-            if (want_preview or tracking) and cap is None:
+            if (want_preview or tracking) and provider is None:
                 try:
-                    log_info(logQueue, "Camera Worker", f"Opening camera {target_cam} at {frame_w}x{frame_h}")
-                    cap = cv2.VideoCapture(target_cam, cv2.CAP_DSHOW)
-                    # Poll for `isOpened()` up to CAMERA_OPEN_TIMEOUT seconds. Some
-                    # backends may take a while to enumerate devices; this prevents
-                    # the worker from hanging indefinitely after the constructor.
+                    log_info(logQueue, "Camera Worker", f"Opening camera {target_cam} at {frame_w}x{frame_h} using backend={backend}")
+                    # Lazy import providers to avoid importing pseyepy/opencv at module import time
                     try:
-                        start_open = time.time()
-                        while not cap.isOpened() and (time.time() - start_open) < float(CAMERA_OPEN_TIMEOUT):
-                            time.sleep(0.05)
-                        if not cap.isOpened():
-                            log_error(logQueue, "Camera Worker", f"Timeout opening camera {target_cam}")
-                            try:
-                                cap.release()
-                            except Exception:
-                                pass
-                            cap = None
+                        if backend == 'openCV':
+                            from workers.cameraProvider_openCV import OpenCVCameraProvider
+                            provider = OpenCVCameraProvider(target_cam, frame_w, frame_h, desired_fps, logQueue=logQueue)
                         else:
-                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
-                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
+                            from workers.cameraProvider_pseyepy import PSEyeProvider
+                            provider = PSEyeProvider(target_cam, frame_w, frame_h, desired_fps, logQueue=logQueue)
+                        # If provider failed to open, provider implementations return None-internal state
+                        if provider is None:
+                            provider = None
+                        else:
                             try:
-                                if desired_fps is not None:
-                                    cap.set(cv2.CAP_PROP_FPS, desired_fps)
+                                pname = getattr(provider, '__class__', type(provider)).__name__
+                                log_info(logQueue, 'Camera Worker', f'Provider created: {pname} (backend={backend})')
                             except Exception:
                                 pass
-                    except Exception:
-                        # If the polling itself fails, ensure we release and continue
-                        try:
-                            cap.release()
-                        except Exception:
-                            pass
-                        cap = None
+                            # (debug print removed)
+                    except Exception as e:
+                        log_error(logQueue, "Camera Worker", f"Failed to create provider for backend {backend}: {e}")
+                        provider = None
                 except Exception as e:
                     log_error(logQueue, "Camera Worker", f"Failed to open camera {target_cam}: {e}")
-                    cap = None
+                    provider = None
 
-            if cap is None:
+            if provider is None:
                 try:
                     time.sleep(CAPTURE_RETRY_DELAY)
                 except KeyboardInterrupt:
                     break
                 continue
-
-            ret, frame = cap.read()
-            if not ret or frame is None:
+            # Read unified frame from provider: (frame, ts)
+            try:
+                frame, _ts = provider.read()
+            except Exception:
+                frame, _ts = (None, None)
+            if frame is None:
                 try:
                     time.sleep(CAPTURE_RETRY_DELAY)
                 except KeyboardInterrupt:
                     break
                 continue
+            # For preview-only mode avoid unnecessary copies and heavy
+            # grayscale / contour work. Only prepare a copy and compute
+            # grayscale when position tracking is enabled.
+            if tracking:
+                proc = frame.copy()
+                gray = cv2.cvtColor(proc, cv2.COLOR_BGR2GRAY)
+            else:
+                # Use frame directly for preview pipeline (no overlay required)
+                proc = frame
+                gray = None
             # mark that cap is open
             cap_was_open = True
             # Count frame for FPS calculation
@@ -276,11 +334,12 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
             except Exception:
                 frames_count = 0
 
-            # Work on a copy
-            proc = frame.copy()
-            gray = cv2.cvtColor(proc, cv2.COLOR_BGR2GRAY)
+            # proc and gray are prepared by backend-specific read logic above
 
-            blob = _find_largest_blob(gray, thresh=thresh_value, min_area=MIN_BLOB_AREA)
+            # Only run blob detection when tracking is requested
+            blob = None
+            if tracking:
+                blob = _find_largest_blob(gray, thresh=thresh_value, min_area=MIN_BLOB_AREA)
 
             now = time.time()
             if blob is not None and tracking:
@@ -354,6 +413,7 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                         # Drop frame if queue full (intentionally small queue)
                         safe_queue_put(preview_queue, (jpg_bytes, time.time()), 
                                      timeout=QUEUE_PUT_TIMEOUT)
+                        # Avoid logging every preview frame (too verbose / costly)
                 except Exception:
                     pass
 
@@ -390,8 +450,11 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
 
     finally:
         try:
-            if cap is not None:
-                cap.release()
+            if provider is not None:
+                try:
+                    provider.close()
+                except Exception:
+                    pass
         except Exception:
             pass
         log_info(logQueue, "Camera Worker", "Stopped")

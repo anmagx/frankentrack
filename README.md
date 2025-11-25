@@ -1,5 +1,5 @@
 # Frankentrack
-![alt text](img/gui_active.png)
+![gui](img/gui_active_11.png)
 
 OpenTrack-compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
 Supports single-point IR-LED tracking for X/Y movement estimation. 
@@ -40,6 +40,7 @@ Nonetheless, thank you Claude.
 * Sensor fusion using complementary filter to produce pitch/roll/yaw angles
 * 2-step drift correction procedure for stable viewing angles
 * Single brightspot optical tracking using a webcam to produce X/Y movement
+* General webcam support with openCV, pseyepy (PS3Eye) with basic webcam settings (gain, exposure)
 * UDP sender for sending into opentrack
 * Central log file (Still work in progress)
 * Multiprocess architecture using queues for IPC
@@ -189,6 +190,19 @@ Drift may be influenced by external factors like temperature or humidity, so the
 
 
 [https://www.youtube.com/watch?v=8bVocOTLqhI]: https://www.youtube.com/watch?v=8bVocOTLqhI
+
+## License
+
+This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for details.
+
+### Third-Party Components
+
+This software incorporates several third-party components with their own licenses:
+
+- **pseyepy**: Apache License 2.0 (Copyright 2017 Ben Deverett) - Modified for Windows compatibility
+- **libusb-1.0**: LGPL v2.1 - Dynamically linked for USB device communication
+
+See [NOTICE](NOTICE) for complete attribution and license information.
 
 ## Support
 

@@ -10,6 +10,15 @@ from tkinter import ttk
 from config.config import QUEUE_PUT_TIMEOUT
 from util.error_utils import safe_queue_put
 
+from workers.gui.managers.icon_helper import set_window_icon
+
+# Global hotkey support
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+
 
 
 
@@ -48,6 +57,11 @@ class OrientationPanel(ttk.LabelFrame):
         
         # Drift correction status (display-only, control moved to CalibrationPanel)
         self.drift_status_var = tk.StringVar(value="Drift Correction Inactive")
+        
+        # Keyboard shortcut for reset orientation
+        self.reset_shortcut_var = tk.StringVar(value="None")
+        self._shortcut_binding_id = None
+        self._global_hotkey_registered = False
 
         
         self._build_ui()
@@ -73,14 +87,25 @@ class OrientationPanel(ttk.LabelFrame):
         
         # Build right section components
         self._build_drift_status(right_frame)
-        # Add Reset Orientation button here (moved from CalibrationPanel)
+        # Add Reset Orientation button and Set Shortcut button here
         try:
+            btn_container = ttk.Frame(right_frame)
+            btn_container.pack(padx=6, pady=(4, 6))
+            
             self.reset_btn = ttk.Button(
-                right_frame,
+                btn_container,
                 text="Reset Orientation",
                 command=self._on_reset
             )
-            self.reset_btn.pack(padx=6, pady=(4, 6))
+            self.reset_btn.pack(side='top', pady=(0, 2))
+            
+            self.shortcut_btn_text = tk.StringVar(value="Set Shortcut...")
+            self.shortcut_btn = ttk.Button(
+                btn_container,
+                textvariable=self.shortcut_btn_text,
+                command=self._on_set_shortcut
+            )
+            self.shortcut_btn.pack(side='top')
         except Exception:
             pass
     
@@ -157,6 +182,271 @@ class OrientationPanel(ttk.LabelFrame):
         # (Control forwarding moved to CalibrationPanel)
 
     
+    
+    def _on_set_shortcut(self):
+        """Open dialog to capture a keyboard shortcut for reset orientation."""
+        # Create popup dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Set Shortcut Key")
+        # Use same icon as main GUI if available
+        try:
+            set_window_icon(dialog)
+        except Exception:
+            pass
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        dialog.geometry("300x120")
+        
+        
+        
+        # Center dialog over parent
+        try:
+            dialog.update_idletasks()
+            x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+            y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+            dialog.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        
+        # Dialog content
+        label = ttk.Label(
+            dialog, 
+            text="Press any key to set as shortcut.\n(This should be the same key as in opentrack)\n(Esc to cancel)",
+            justify='center',
+            padding=20
+        )
+        label.pack(expand=True)
+        
+        current_label = ttk.Label(
+            dialog,
+            text=f"Current: {self.reset_shortcut_var.get()}",
+            foreground='gray'
+        )
+        current_label.pack()
+        
+        # Capture key press
+        def on_key(event):
+            # Use keysym for the key name, but also check keycode for numpad
+            key = event.keysym
+            keycode = event.keycode
+            
+            # Cancel on Escape
+            if key == 'Escape':
+                dialog.destroy()
+                return
+            
+            # Windows numpad keycodes (with NumLock on, these send regular keysyms):
+            # 96-105: Numpad 0-9
+            # 106: Numpad *, 107: Numpad +, 109: Numpad -, 110: Numpad ., 111: Numpad /
+            numpad_keycode_map = {
+                96: ('KP_0', 'Numpad 0'), 97: ('KP_1', 'Numpad 1'), 98: ('KP_2', 'Numpad 2'),
+                99: ('KP_3', 'Numpad 3'), 100: ('KP_4', 'Numpad 4'), 101: ('KP_5', 'Numpad 5'),
+                102: ('KP_6', 'Numpad 6'), 103: ('KP_7', 'Numpad 7'), 104: ('KP_8', 'Numpad 8'),
+                105: ('KP_9', 'Numpad 9'), 110: ('KP_Decimal', 'Numpad .'),
+                111: ('KP_Divide', 'Numpad /'), 106: ('KP_Multiply', 'Numpad *'),
+                109: ('KP_Subtract', 'Numpad -'), 107: ('KP_Add', 'Numpad +')
+            }
+            
+            # Check if this is a numpad key by keycode
+            if keycode in numpad_keycode_map:
+                binding_key, display_name = numpad_keycode_map[keycode]
+            elif key.startswith('KP_'):
+                # NumLock off case - already has KP_ prefix
+                numpad_map = {
+                    'KP_0': 'Numpad 0', 'KP_1': 'Numpad 1', 'KP_2': 'Numpad 2',
+                    'KP_3': 'Numpad 3', 'KP_4': 'Numpad 4', 'KP_5': 'Numpad 5',
+                    'KP_6': 'Numpad 6', 'KP_7': 'Numpad 7', 'KP_8': 'Numpad 8',
+                    'KP_9': 'Numpad 9', 'KP_Decimal': 'Numpad .', 'KP_Divide': 'Numpad /',
+                    'KP_Multiply': 'Numpad *', 'KP_Subtract': 'Numpad -', 'KP_Add': 'Numpad +',
+                    'KP_Enter': 'Numpad Enter'
+                }
+                binding_key = key
+                display_name = numpad_map.get(key, key)
+            else:
+                # Regular key
+                binding_key = key
+                display_name = key
+            
+            # Store the shortcut (use binding_key for actual binding)
+            self._set_reset_shortcut(binding_key, display_name)
+            
+            # Show brief confirmation
+            label.config(text=f"Shortcut set to: {display_name}")
+            dialog.after(500, dialog.destroy)
+        
+        dialog.bind('<Key>', on_key)
+        dialog.focus_set()
+        dialog.grab_set()
+    
+    def _set_reset_shortcut(self, key, display_name=None):
+        """Set the keyboard shortcut for reset orientation.
+        
+        Args:
+            key: Key symbol (e.g., 'r', 'F5', 'space', 'KP_0')
+            display_name: Optional friendly display name (e.g., 'Numpad 0')
+        """
+        # Remove old binding if exists
+        if self._shortcut_binding_id is not None:
+            try:
+                root = self.winfo_toplevel()
+                root.unbind(self._shortcut_binding_id)
+            except Exception:
+                pass
+            self._shortcut_binding_id = None
+        
+        # Remove old global hotkey if exists
+        if self._global_hotkey_registered and KEYBOARD_AVAILABLE:
+            try:
+                keyboard.unhook_all()
+                self._global_hotkey_registered = False
+            except Exception:
+                pass
+        
+        # Store new shortcut (use actual keysym for persistence)
+        self.reset_shortcut_var.set(key)
+        
+        # Use display name if provided, otherwise use key
+        if display_name is None:
+            display_name = key
+        
+        # Update button text
+        self.shortcut_btn_text.set(f"Shortcut: {display_name}")
+        
+        # Register global hotkey
+        if KEYBOARD_AVAILABLE:
+            try:
+                # Convert Tkinter keysym to keyboard module format
+                hotkey_str = self._convert_keysym_to_keyboard(key)
+                
+                if hotkey_str:
+                    # Register global hotkey
+                    keyboard.add_hotkey(hotkey_str, self._on_reset, suppress=False)
+                    self._global_hotkey_registered = True
+                    
+                    if self.message_callback:
+                        self.message_callback(f"Global hotkey registered: {display_name}")
+                else:
+                    if self.message_callback:
+                        self.message_callback(f"Warning: Could not map key '{display_name}' for global hotkey")
+            except Exception as ex:
+                if self.message_callback:
+                    self.message_callback(f"Warning: Could not register global hotkey '{display_name}': {ex}")
+        else:
+            # Fallback to local binding if keyboard module not available
+            try:
+                root = self.winfo_toplevel()
+                
+                # For numpad keys, bind using <KeyPress> with a filter function
+                if key.startswith('KP_'):
+                    numpad_keycode_map = {
+                        'KP_0': 96, 'KP_1': 97, 'KP_2': 98, 'KP_3': 99, 'KP_4': 100,
+                        'KP_5': 101, 'KP_6': 102, 'KP_7': 103, 'KP_8': 104, 'KP_9': 105,
+                        'KP_Decimal': 110, 'KP_Divide': 111, 'KP_Multiply': 106,
+                        'KP_Subtract': 109, 'KP_Add': 107
+                    }
+                    
+                    target_keycode = numpad_keycode_map.get(key)
+                    if target_keycode:
+                        def keypress_handler(event):
+                            if event.keycode == target_keycode:
+                                self._on_reset()
+                        
+                        self._shortcut_binding_id = root.bind('<KeyPress>', keypress_handler, add='+')
+                    else:
+                        binding = f'<{key}>'
+                        self._shortcut_binding_id = root.bind(binding, lambda e: self._on_reset())
+                else:
+                    # Regular key - use standard binding
+                    binding = f'<{key}>'
+                    self._shortcut_binding_id = root.bind(binding, lambda e: self._on_reset())
+                    
+            except Exception as ex:
+                if self.message_callback:
+                    self.message_callback(f"Warning: Could not bind shortcut key '{display_name}': {ex}")
+    
+    def _convert_keysym_to_keyboard(self, keysym):
+        """Convert Tkinter keysym to keyboard module format.
+        
+        Args:
+            keysym: Tkinter key symbol (e.g., 'r', 'F5', 'KP_0')
+            
+        Returns:
+            String for keyboard module, or None if conversion fails
+        """
+        # Map numpad keys
+        numpad_map = {
+            'KP_0': 'num 0', 'KP_1': 'num 1', 'KP_2': 'num 2',
+            'KP_3': 'num 3', 'KP_4': 'num 4', 'KP_5': 'num 5',
+            'KP_6': 'num 6', 'KP_7': 'num 7', 'KP_8': 'num 8',
+            'KP_9': 'num 9', 'KP_Decimal': 'num decimal',
+            'KP_Divide': 'num divide', 'KP_Multiply': 'num multiply',
+            'KP_Subtract': 'num subtract', 'KP_Add': 'num add',
+            'KP_Enter': 'num enter'
+        }
+        
+        if keysym in numpad_map:
+            return numpad_map[keysym]
+        
+        # Map function keys
+        if keysym.startswith('F') and len(keysym) <= 3:
+            try:
+                # F1-F24
+                num = int(keysym[1:])
+                if 1 <= num <= 24:
+                    return keysym.lower()
+            except ValueError:
+                pass
+        
+        # Map special keys
+        special_map = {
+            'space': 'space',
+            'Return': 'enter',
+            'BackSpace': 'backspace',
+            'Tab': 'tab',
+            'Escape': 'esc',
+            'Delete': 'delete',
+            'Insert': 'insert',
+            'Home': 'home',
+            'End': 'end',
+            'Prior': 'page up',
+            'Next': 'page down',
+            'Up': 'up',
+            'Down': 'down',
+            'Left': 'left',
+            'Right': 'right'
+        }
+        
+        if keysym in special_map:
+            return special_map[keysym]
+        
+        # For regular single character keys, use lowercase
+        if len(keysym) == 1:
+            return keysym.lower()
+        
+        return None
+    
+    def _clear_reset_shortcut(self):
+        """Clear the keyboard shortcut binding."""
+        if self._shortcut_binding_id is not None:
+            try:
+                root = self.winfo_toplevel()
+                # For <KeyPress> bindings with add='+', we need to unbind properly
+                # Get the binding and remove it
+                root.unbind('<KeyPress>', self._shortcut_binding_id)
+            except Exception:
+                pass
+            self._shortcut_binding_id = None
+        
+        # Remove global hotkey
+        if self._global_hotkey_registered and KEYBOARD_AVAILABLE:
+            try:
+                keyboard.unhook_all()
+                self._global_hotkey_registered = False
+            except Exception:
+                pass
+        
+        self.reset_shortcut_var.set("None")
+        self.shortcut_btn_text.set("Set Shortcut...")
     
     def _on_reset(self):
         """Handle orientation reset button click."""
@@ -263,20 +553,38 @@ class OrientationPanel(ttk.LabelFrame):
         Get current preferences for persistence.
         
         Returns:
-            dict: Dictionary with 'drift_angle' key
+            dict: Dictionary with preferences including reset shortcut
         """
-        # Orientation panel has no persistent preferences
-        return {}
+        return {
+            'reset_shortcut': self.reset_shortcut_var.get()
+        }
     
     def set_prefs(self, prefs):
         """
         Apply saved preferences.
         
         Args:
-            prefs: Dictionary with optional 'drift_angle' key
+            prefs: Dictionary with optional preference keys including 'reset_shortcut'
         """
-        # Orientation display panel has no preferences to apply here.
-        return
+        # Restore keyboard shortcut if saved
+        shortcut = prefs.get('reset_shortcut', 'None')
+        if shortcut and shortcut != 'None':
+            try:
+                # Generate display name for numpad keys
+                display_name = shortcut
+                if shortcut.startswith('KP_'):
+                    numpad_map = {
+                        'KP_0': 'Numpad 0', 'KP_1': 'Numpad 1', 'KP_2': 'Numpad 2',
+                        'KP_3': 'Numpad 3', 'KP_4': 'Numpad 4', 'KP_5': 'Numpad 5',
+                        'KP_6': 'Numpad 6', 'KP_7': 'Numpad 7', 'KP_8': 'Numpad 8',
+                        'KP_9': 'Numpad 9', 'KP_Decimal': 'Numpad .', 'KP_Divide': 'Numpad /',
+                        'KP_Multiply': 'Numpad *', 'KP_Subtract': 'Numpad -', 'KP_Add': 'Numpad +',
+                        'KP_Enter': 'Numpad Enter'
+                    }
+                    display_name = numpad_map.get(shortcut, shortcut)
+                self._set_reset_shortcut(shortcut, display_name)
+            except Exception:
+                pass
     
     def reset_position_offsets(self):
         """Reset position offsets to zero (for testing or manual reset)."""
