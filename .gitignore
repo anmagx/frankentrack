@@ -61,6 +61,7 @@ config/config.cfg
 htmlcov/
 .tox/
 .nox/
+pseyepy/
 
 # Jupyter Notebook
 .ipynb_checkpoints
