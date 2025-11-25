@@ -364,11 +364,7 @@ class CameraPanel(ttk.LabelFrame):
             self.fps_cb.configure(state='disabled')
             self.backend_cb.configure(state='disabled')
             self.res_cb.configure(state='disabled')
-            if hasattr(self, 'thresh_scale'):
-                try:
-                    self.thresh_scale.configure(state='disabled')
-                except Exception:
-                    pass
+            # thresh_scale is now in Options dialog, not main panel
             self.enumerate_btn.configure(state='disabled')
         else:
             self.pos_btn_text.set("Start Position Tracking")
@@ -384,11 +380,7 @@ class CameraPanel(ttk.LabelFrame):
             self.fps_cb.configure(state='readonly')
             self.backend_cb.configure(state='readonly')
             self.res_cb.configure(state='readonly')
-            if hasattr(self, 'thresh_scale'):
-                try:
-                    self.thresh_scale.configure(state='normal')
-                except Exception:
-                    pass
+            # thresh_scale is now in Options dialog, not main panel
             self.enumerate_btn.configure(state='normal')
     
     def update_preview(self, jpeg_data: bytes):
@@ -586,11 +578,7 @@ class CameraPanel(ttk.LabelFrame):
         self.backend_cb.configure(state='disabled')
         self.res_cb.configure(state='disabled')
         self.pos_btn.configure(state='disabled')
-        if hasattr(self, 'thresh_scale'):
-            try:
-                self.thresh_scale.configure(state='disabled')
-            except Exception:
-                pass
+        # thresh_scale is now in Options dialog, not main panel
     
     def _enable_controls_after_enumeration(self):
         """Re-enable camera controls after enumeration completes."""
@@ -601,7 +589,7 @@ class CameraPanel(ttk.LabelFrame):
         self.backend_cb.configure(state='readonly')
         self.res_cb.configure(state='readonly')
         self.pos_btn.configure(state='normal')
-        self.thresh_scale.configure(state='normal')
+        # thresh_scale is now in Options dialog, not main panel
     
     def _enumerate_cameras(self, max_checks: int = 32):
         """Probe camera indices in a background thread.
