@@ -56,8 +56,31 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+echo Installing pseyepy dependencies from requirements.txt...
+"%INSTALL_DIR%\.venv\Scripts\python.exe" -m pip install -r "%INSTALL_DIR%\pseyepy\requirements.txt"
+if errorlevel 1 (
+    echo ERROR: Failed to install pseyepy dependencies
+    pause
+    exit /b 1
+)
+
 echo Dependencies installed successfully!
+echo installing pseyepy...
+
+cd "%INSTALL_DIR%\pseyepy"
+"%INSTALL_DIR%\.venv\Scripts\python.exe" -m pip install .
+if errorlevel 1 (
+    echo ERROR: Failed to install pseyepy
+    pause
+    exit /b 1
+)
+
+cd "%INSTALL_DIR%"
+
+echo pseyepy installed successfully!
 echo.
+
 
 REM Create a launch script
 echo Creating launch script...
