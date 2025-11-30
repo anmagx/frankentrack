@@ -54,29 +54,17 @@ class PSEyeProvider:
 
     def read(self):
         if self.camera is None:
-            try:
-                log_error(self.logQueue, 'PSEyeProvider', f'read() called but camera is not initialized')
-            except Exception:
-                pass
-            # (debug print removed)
+            # Don't log here - this would spam if called in a loop waiting for camera
             return (None, None)
         try:
             # pseyepy returns (imgs, ts)
             data = self.camera.read(timestamp=True, squeeze=True)
             if data is None:
-                try:
-                    log_error(self.logQueue, 'PSEyeProvider', f'read() returned None for camera {self.index}')
-                except Exception:
-                    pass
-                # (debug print removed)
+                # Don't log per-frame errors - they can spam at high FPS
                 return (None, None)
             frame_obj, ts = data
             if frame_obj is None:
-                try:
-                    log_error(self.logQueue, 'PSEyeProvider', f'read() returned empty frame for camera {self.index}')
-                except Exception:
-                    pass
-                # (debug print removed)
+                # Don't log per-frame errors - they can spam at high FPS
                 return (None, None)
             # Try to convert RGB -> BGR for downstream OpenCV processing
             try:
@@ -84,18 +72,10 @@ class PSEyeProvider:
                 frame_bgr = cv2.cvtColor(frame_obj, cv2.COLOR_RGB2BGR)
             except Exception:
                 frame_bgr = frame_obj.copy()
-            try:
-                log_info(self.logQueue, 'PSEyeProvider', f'read() delivered frame for camera {self.index} ts={ts}')
-            except Exception:
-                pass
-            # (debug print removed)
+            # NOTE: Do NOT log every frame here - it destroys performance at high FPS!
             return (frame_bgr, ts)
         except Exception:
-            try:
-                log_error(self.logQueue, 'PSEyeProvider', f'Exception during read() for camera {self.index}')
-            except Exception:
-                pass
-            # (debug print removed)
+            # Don't log per-frame exceptions - they can spam at high FPS
             return (None, None)
 
     def set_params(self, width, height, fps):

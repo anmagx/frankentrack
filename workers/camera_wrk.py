@@ -145,8 +145,15 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
         # FPS reporting for actual camera input (frames read from capture)
         frames_count = 0
         last_fps_ts = time.time()
-        # track whether capture was open on previous loop to detect transitions
-        cap_was_open = False
+        
+        # Diagnostic timing accumulators (prints to stdout, not log queue)
+        _diag_read_ms = 0.0
+        _diag_gray_ms = 0.0
+        _diag_blob_ms = 0.0
+        _diag_queue_ms = 0.0
+        _diag_preview_ms = 0.0
+        _diag_count = 0
+        _diag_last_report = time.time()
 
         while stop_event is None or not stop_event.is_set():
             # process control commands (drain queue)
@@ -305,29 +312,39 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                 except KeyboardInterrupt:
                     break
                 continue
+
+            # Capture loop start time for accurate FPS pacing
+            loop_start_time = time.time()
+
             # Read unified frame from provider: (frame, ts)
+            _t0 = time.time()
             try:
                 frame, _ts = provider.read()
             except Exception:
                 frame, _ts = (None, None)
+            _diag_read_ms += (time.time() - _t0) * 1000.0
+            
             if frame is None:
                 try:
                     time.sleep(CAPTURE_RETRY_DELAY)
                 except KeyboardInterrupt:
                     break
                 continue
+
             # For preview-only mode avoid unnecessary copies and heavy
             # grayscale / contour work. Only prepare a copy and compute
-            # grayscale when position tracking is enabled.
+            # grayscale when position tracking is enabled and we need overlay.
+            # We defer the copy until we know we need to draw on the frame.
+            _t0 = time.time()
             if tracking:
-                proc = frame.copy()
-                gray = cv2.cvtColor(proc, cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             else:
-                # Use frame directly for preview pipeline (no overlay required)
-                proc = frame
                 gray = None
-            # mark that cap is open
-            cap_was_open = True
+            _diag_gray_ms += (time.time() - _t0) * 1000.0
+            # proc will be set to frame or a copy if we need to draw overlay
+            proc = frame
+            need_overlay_copy = False
+
             # Count frame for FPS calculation
             try:
                 frames_count += 1
@@ -337,9 +354,11 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
             # proc and gray are prepared by backend-specific read logic above
 
             # Only run blob detection when tracking is requested
+            _t0 = time.time()
             blob = None
             if tracking:
                 blob = _find_largest_blob(gray, thresh=thresh_value, min_area=MIN_BLOB_AREA)
+            _diag_blob_ms += (time.time() - _t0) * 1000.0
 
             now = time.time()
             if blob is not None and tracking:
@@ -376,20 +395,30 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                         pass
                 
                 # publish for UDP and GUI display
-                safe_queue_put(translationQueue, tdata, timeout=QUEUE_PUT_TIMEOUT)
-                safe_queue_put(translationDisplayQueue, tdata, timeout=QUEUE_PUT_TIMEOUT)
+                # Use non-blocking put (timeout=0) - drop frame if queue full
+                # This is correct for real-time tracking: blocking would cause
+                # the camera loop to slow down and miss frames
+                _t0 = time.time()
+                safe_queue_put(translationQueue, tdata, timeout=0)
+                safe_queue_put(translationDisplayQueue, tdata, timeout=0)
+                _diag_queue_ms += (time.time() - _t0) * 1000.0
 
-                # draw overlay on proc
-                cv2.circle(proc, (int(cx), int(cy)), 6, (0,255,0), 2)
-                cv2.putText(proc, f"X:{x_val:.2f} Y:{y_val:.2f}", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                # draw overlay on proc - only copy if preview is also enabled
+                if want_preview:
+                    if not need_overlay_copy:
+                        proc = frame.copy()
+                        need_overlay_copy = True
+                    cv2.circle(proc, (int(cx), int(cy)), 6, (0,255,0), 2)
+                    cv2.putText(proc, f"X:{x_val:.2f} Y:{y_val:.2f}", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
             elif tracking:
                 # No blob found but tracking is active: either re-publish last-known XY
                 # while within STALE_DETECTION_TIMEOUT, or mark tracking as stale.
                 if last_x is not None and last_y is not None:
                     if last_detection_time is not None and (now - last_detection_time) <= STALE_DETECTION_TIMEOUT:
                         tdata = [float(last_x), float(last_y), 0.0]
-                        safe_queue_put(translationQueue, tdata, timeout=QUEUE_PUT_TIMEOUT)
-                        safe_queue_put(translationDisplayQueue, tdata, timeout=QUEUE_PUT_TIMEOUT)
+                        # Non-blocking put - drop if queue full
+                        safe_queue_put(translationQueue, tdata, timeout=0)
+                        safe_queue_put(translationDisplayQueue, tdata, timeout=0)
                     else:
                         # stale: stop republishing and notify once
                         if not lost_state:
@@ -402,6 +431,7 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                                 pass
 
             # preview handling: downscale and send JPEG bytes
+            _t0 = time.time()
             if want_preview and preview_queue is not None:
                 try:
                     # downscale using constants from config
@@ -416,6 +446,8 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                         # Avoid logging every preview frame (too verbose / costly)
                 except Exception:
                     pass
+            _diag_preview_ms += (time.time() - _t0) * 1000.0
+            _diag_count += 1
 
             # Periodically report the camera input FPS (based on frames read)
             try:
@@ -429,22 +461,41 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                     safe_queue_put(statusQueue, ('cam_fps', fps), timeout=QUEUE_PUT_TIMEOUT)
             except Exception:
                 pass
+            
+            # Diagnostic timing report (every 5 seconds, to stdout only)
+            try:
+                if _diag_count > 0 and (now_fps - _diag_last_report) >= 5.0:
+                    n = _diag_count
+                    print(f"[Camera DIAG] {n} frames | avg(ms): read={_diag_read_ms/n:.2f}, "
+                          f"gray={_diag_gray_ms/n:.2f}, blob={_diag_blob_ms/n:.2f}, "
+                          f"queue={_diag_queue_ms/n:.2f}, preview={_diag_preview_ms/n:.2f}, "
+                          f"total={(_diag_read_ms+_diag_gray_ms+_diag_blob_ms+_diag_queue_ms+_diag_preview_ms)/n:.2f}")
+                    _diag_read_ms = _diag_gray_ms = _diag_blob_ms = _diag_queue_ms = _diag_preview_ms = 0.0
+                    _diag_count = 0
+                    _diag_last_report = now_fps
+            except Exception:
+                pass
 
             # Frame pacing: if desired_fps was requested, try to pace loop to that rate.
-            # Otherwise, fall back to a small sleep to avoid busy-looping.
+            # Use loop_start_time captured at beginning of iteration for accurate timing.
+            # Otherwise, use a minimal sleep just to yield CPU (not the old CAMERA_LOOP_DELAY
+            # which was 20ms and capped FPS at ~50).
             try:
-                loop_elapsed = time.time() - now
+                loop_elapsed = time.time() - loop_start_time
                 if desired_fps is not None and desired_fps > 0:
                     target_interval = 1.0 / float(desired_fps)
                     delay = target_interval - loop_elapsed
                     if delay > 0:
                         time.sleep(delay)
+                    # else: loop took longer than target, don't sleep
                 else:
-                    # small sleep to yield CPU when no explicit fps target
-                    time.sleep(CAMERA_LOOP_DELAY)
+                    # Minimal sleep to yield CPU when no explicit fps target.
+                    # Use 1ms instead of CAMERA_LOOP_DELAY (20ms) to allow higher FPS.
+                    if loop_elapsed < 0.001:
+                        time.sleep(0.001)
             except Exception:
                 try:
-                    time.sleep(CAMERA_LOOP_DELAY)
+                    time.sleep(0.001)
                 except Exception:
                     pass
 
