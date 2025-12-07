@@ -87,6 +87,19 @@ class OrientationPanel(ttk.LabelFrame):
         
         # Build right section components
         self._build_drift_status(right_frame)
+        # Filter selection dropdown
+        try:
+            filt_container = ttk.Frame(right_frame)
+            filt_container.pack(padx=6, pady=(4, 4))
+            ttk.Label(filt_container, text="Filter:").pack(side='left', padx=(0, 6))
+            # choices: 'complementary' (Euler-based) and 'quaternion'
+            self.filter_var = tk.StringVar(value='complementary')
+            # Use Combobox for a consistent ttk widget
+            self.filter_menu = ttk.Combobox(filt_container, textvariable=self.filter_var, values=('complementary','quaternion'), state='readonly', width=12)
+            self.filter_menu.pack(side='left')
+            self.filter_menu.bind('<<ComboboxSelected>>', lambda e: self._on_filter_change(self.filter_var.get()))
+        except Exception:
+            pass
         # Add Reset Orientation button and Set Shortcut button here
         try:
             btn_container = ttk.Frame(right_frame)
@@ -277,6 +290,18 @@ class OrientationPanel(ttk.LabelFrame):
         dialog.bind('<Key>', on_key)
         dialog.focus_set()
         dialog.grab_set()
+
+    def _on_filter_change(self, val):
+        """Send filter selection change to fusion worker via control queue."""
+        try:
+            if self.control_queue:
+                # Send tuple command: ('set_filter', 'quaternion'|'complementary')
+                safe_queue_put(self.control_queue, ('set_filter', val), timeout=QUEUE_PUT_TIMEOUT)
+                if self.message_callback:
+                    self.message_callback(f"Filter changed to: {val}")
+        except Exception:
+            if self.message_callback:
+                self.message_callback(f"Failed to set filter to: {val}")
     
     def _set_reset_shortcut(self, key, display_name=None):
         """Set the keyboard shortcut for reset orientation.
@@ -556,7 +581,8 @@ class OrientationPanel(ttk.LabelFrame):
             dict: Dictionary with preferences including reset shortcut
         """
         return {
-            'reset_shortcut': self.reset_shortcut_var.get()
+            'reset_shortcut': self.reset_shortcut_var.get(),
+            'filter': getattr(self, 'filter_var', tk.StringVar(value='complementary')).get()
         }
     
     def set_prefs(self, prefs):
@@ -585,6 +611,18 @@ class OrientationPanel(ttk.LabelFrame):
                 self._set_reset_shortcut(shortcut, display_name)
             except Exception:
                 pass
+        # Restore filter selection if saved
+        try:
+            filt = prefs.get('filter', None)
+            if filt and hasattr(self, 'filter_var'):
+                self.filter_var.set(filt)
+                # Notify fusion worker of the preference (best-effort)
+                try:
+                    self._on_filter_change(filt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def reset_position_offsets(self):
         """Reset position offsets to zero (for testing or manual reset)."""

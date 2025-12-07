@@ -106,18 +106,18 @@ class ComplementaryFilter:
         # Validate dt before updating time baseline
         if dt <= 0:
             # Negative or zero dt - likely duplicate or time reset, skip update
-            return self.yaw, self.pitch, self.roll, False
-        
+            return self.yaw, self.pitch, self.roll, False, False
+
         if dt < DT_MIN:
             # Too small, likely duplicate timestamp
-            return self.yaw, self.pitch, self.roll, False
-        
+            return self.yaw, self.pitch, self.roll, False, False
+
         if dt > DT_MAX:
             # Gap too large - reset time baseline without updating orientation
             from util.log_utils import log_warning
             log_warning(self.logQueue, "Fusion", f"Large dt: {dt:.3f}s, resetting baseline")
             self.last_time = timestamp
-            return self.yaw, self.pitch, self.roll, False
+            return self.yaw, self.pitch, self.roll, False, False
         
         # Valid dt - update baseline
         self.last_time = timestamp
@@ -204,7 +204,7 @@ class ComplementaryFilter:
         self.roll = normalize_angle(self.roll)
         
         return self.yaw, self.pitch, self.roll, drift_correction_active, is_stationary
-    
+
     def _accel_to_rp(self, accel):
         """
         Calculate roll and pitch from accelerometer (assumes gravity-only).
@@ -216,20 +216,209 @@ class ComplementaryFilter:
             (roll, pitch) in degrees
         """
         ax, ay, az = accel
-        
         # Roll: rotation around X axis
         roll = np.arctan2(ay, az) * 180.0 / np.pi
-        
         # Pitch: rotation around Y axis
         pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2)) * 180.0 / np.pi
-        
         return roll, pitch
-    
+
     def reset(self):
         """Reset orientation to zero."""
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
+
+
+class QuaternionComplementaryFilter:
+    """Complementary filter implemented with quaternion integration.
+
+    This provides the same external API as `ComplementaryFilter` but uses
+    quaternions for orientation integration and accel-based roll/pitch
+    correction.
+    """
+
+    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, logQueue=None):
+        self.alpha_roll = ALPHA_ROLL
+        self.alpha_pitch = ALPHA_PITCH
+        self.alpha_yaw = ALPHA_YAW
+        self.alpha_drift = ALPHA_DRIFT_CORRECTION
+        self.accel_threshold = accel_threshold
+        self.center_threshold = center_threshold
+        self.gyro_bias_yaw = 0.0
+        self.gyro_calibrated = False
+        self._stationary_start = None
+        self._last_stationary = False
+        self._gyro_stationary_threshold = STATIONARY_GYRO_THRESHOLD
+        self._stationary_debounce_s = STATIONARY_DEBOUNCE_S
+        # Quaternion as [w, x, y, z]
+        self.q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        self.last_time = None
+        self.logQueue = logQueue
+
+    # --- Quaternion helper methods ---
+    def _quat_normalize(self, q):
+        n = np.linalg.norm(q)
+        if n == 0:
+            return np.array([1.0, 0.0, 0.0, 0.0])
+        return q / n
+
+    def _quat_mul(self, a, b):
+        # Hamilton product
+        w1, x1, y1, z1 = a
+        w2, x2, y2, z2 = b
+        return np.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ], dtype=float)
+
+    def _euler_from_quat(self, q):
+        # returns (yaw, pitch, roll) in degrees
+        w, x, y, z = q
+        # roll (x-axis rotation)
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + y * y)
+        roll = np.degrees(np.arctan2(t0, t1))
+
+        # pitch (y-axis)
+        t2 = +2.0 * (w * y - z * x)
+        t2 = np.clip(t2, -1.0, 1.0)
+        pitch = np.degrees(np.arcsin(t2))
+
+        # yaw (z-axis)
+        t3 = +2.0 * (w * z + x * y)
+        t4 = +1.0 - 2.0 * (y * y + z * z)
+        yaw = np.degrees(np.arctan2(t3, t4))
+
+        return yaw, pitch, roll
+
+    def _quat_from_euler(self, yaw, pitch, roll):
+        # input degrees
+        cy = np.cos(np.radians(yaw) * 0.5)
+        sy = np.sin(np.radians(yaw) * 0.5)
+        cp = np.cos(np.radians(pitch) * 0.5)
+        sp = np.sin(np.radians(pitch) * 0.5)
+        cr = np.cos(np.radians(roll) * 0.5)
+        sr = np.sin(np.radians(roll) * 0.5)
+
+        w = cr * cp * cy + sr * sp * sy
+        x = sr * cp * cy - cr * sp * sy
+        y = cr * sp * cy + sr * cp * sy
+        z = cr * cp * sy - sr * sp * cy
+        return np.array([w, x, y, z], dtype=float)
+
+    def _nlerp(self, a, b, t):
+        q = (1.0 - t) * a + t * b
+        return self._quat_normalize(q)
+
+    def _accel_to_rp(self, accel):
+        ax, ay, az = accel
+        roll = np.arctan2(ay, az) * 180.0 / np.pi
+        pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2)) * 180.0 / np.pi
+        return roll, pitch
+
+    def update(self, gyro, accel, timestamp):
+        # Maintain same semantics as ComplementaryFilter.update
+        if self.last_time is None:
+            try:
+                from util.log_utils import log_info
+                log_info(self.logQueue, "Fusion", f"Initializing quaternion baseline at {timestamp}")
+            except Exception:
+                pass
+            try:
+                print(f"[Fusion] Initializing quaternion baseline at {timestamp}")
+            except Exception:
+                pass
+            self.last_time = timestamp
+            self.q = np.array([1.0, 0.0, 0.0, 0.0])
+            return 0.0, 0.0, 0.0, False, False
+
+        dt = timestamp - self.last_time
+        if dt <= 0 or dt < DT_MIN:
+            y, p, r = self._euler_from_quat(self.q)
+            return y, p, r, False, False
+        if dt > DT_MAX:
+            try:
+                from util.log_utils import log_warning
+                log_warning(self.logQueue, "Fusion", f"Large dt: {dt:.3f}s, resetting quaternion baseline")
+            except Exception:
+                pass
+            self.last_time = timestamp
+            y, p, r = self._euler_from_quat(self.q)
+            return y, p, r, False, False
+
+        self.last_time = timestamp
+
+        gx, gy, gz = gyro
+        # apply bias to gz
+        gz_corr = gz - self.gyro_bias_yaw
+
+        # Integrate quaternion using gyro (deg/s -> rad/s)
+        omega = np.array([0.0, np.radians(gx), np.radians(gy), np.radians(gz_corr)])
+        q = self.q
+        q_dot = 0.5 * self._quat_mul(q, omega)
+        q = q + q_dot * dt
+        q = self._quat_normalize(q)
+
+        # accel-based roll/pitch correction (if accel valid)
+        ax, ay, az = accel
+        accel_mag = np.sqrt(ax*ax + ay*ay + az*az)
+        gyro_mag = np.sqrt(gx*gx + gy*gy + gz*gz)
+
+        accel_ok = False
+        if accel_mag >= 0.01:
+            accel_ok = abs(accel_mag - 1.0) < self.accel_threshold
+
+        candidate_stationary = accel_ok and (gyro_mag < self._gyro_stationary_threshold)
+        if candidate_stationary:
+            if self._stationary_start is None:
+                self._stationary_start = timestamp
+            is_stationary = (timestamp - self._stationary_start) >= self._stationary_debounce_s
+        else:
+            self._stationary_start = None
+            is_stationary = False
+
+        # If stationary+near center use drift correction similar to Euler filter
+        yaw_est, pitch_est, roll_est = self._euler_from_quat(q)
+        def _angle_diff(a, b):
+            diff = (a - b + 180) % 360 - 180
+            return abs(diff)
+        is_near_center = (_angle_diff(yaw_est, 0) < self.center_threshold and
+                          _angle_diff(pitch_est, 0) < self.center_threshold and
+                          _angle_diff(roll_est, 0) < self.center_threshold)
+
+        drift_active = False
+        if is_stationary and is_near_center:
+            # Pull quaternion towards zero roll/pitch slowly
+            target_q = self._quat_from_euler(0.0, 0.0, 0.0)
+            q = self._nlerp(q, target_q, 1.0 - self.alpha_drift)
+            drift_active = True
+        else:
+            if accel_ok:
+                accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
+                # Build target quaternion that retains current yaw but uses accel roll/pitch
+                current_yaw, _, _ = self._euler_from_quat(q)
+                target_q = self._quat_from_euler(current_yaw, accel_pitch, accel_roll)
+                # Blend between gyro-integrated quaternion and accel-derived quaternion
+                q = self._nlerp(q, target_q, 1.0 - self.alpha_roll)
+
+        q = self._quat_normalize(q)
+        self.q = q
+
+        yaw, pitch, roll = self._euler_from_quat(q)
+        # normalize angles
+        yaw = normalize_angle(yaw)
+        pitch = normalize_angle(pitch)
+        roll = normalize_angle(roll)
+
+        return yaw, pitch, roll, drift_active, is_stationary
+
+    def reset(self):
+        """Reset quaternion orientation to identity (zero rotation)."""
+        self.q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+    
+    
 
 
 def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQueue, stop_event, logQueue=None):
@@ -243,11 +432,19 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     
     # Initialize filter with defaults from config. The GUI can update
     # `filter.center_threshold` at runtime via the controlQueue ('set_center_threshold').
-    filter = ComplementaryFilter(
-        accel_threshold=ACCEL_THRESHOLD, 
-        center_threshold=DEFAULT_CENTER_THRESHOLD,
-        logQueue=logQueue
-    )
+    # Support two filter implementations: 'complementary' (Euler-based) and 'quaternion'.
+    def _create_filter(name):
+        if name == 'quaternion':
+            return QuaternionComplementaryFilter(accel_threshold=ACCEL_THRESHOLD,
+                                                 center_threshold=DEFAULT_CENTER_THRESHOLD,
+                                                 logQueue=logQueue)
+        else:
+            return ComplementaryFilter(accel_threshold=ACCEL_THRESHOLD,
+                                       center_threshold=DEFAULT_CENTER_THRESHOLD,
+                                       logQueue=logQueue)
+
+    filter_type = 'complementary'
+    filter = _create_filter(filter_type)
     # Startup calibration disabled: calibration must be triggered manually
     # by the GUI (recalibrate_gyro_bias). Inform GUI of current calibration
     # state (not calibrated) so the UI can reflect it.
@@ -266,11 +463,59 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             # Check for control commands (non-blocking)
             cmd = safe_queue_get(controlQueue, timeout=0.0, default=None)
             if cmd is not None:
+                # Allow switching filter implementation at runtime
+                if (isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_filter') or (isinstance(cmd, str) and cmd.startswith('set_filter')):
+                    try:
+                        # Accept ('set_filter', 'quaternion') or ('set_filter', 'complementary')
+                        if isinstance(cmd, (list, tuple)):
+                            new_type = str(cmd[1])
+                        else:
+                            # string form: 'set_filter:quaternion' not expected but support gracefully
+                            parts = cmd.split(':', 1)
+                            new_type = parts[1] if len(parts) > 1 else 'complementary'
+
+                        new_type = new_type.lower()
+                        if new_type not in ('quaternion', 'complementary'):
+                            new_type = 'complementary'
+
+                        if new_type != filter_type:
+                            old_bias = getattr(filter, 'gyro_bias_yaw', 0.0)
+                            old_cal = getattr(filter, 'gyro_calibrated', False)
+                            filter = _create_filter(new_type)
+                            # preserve bias/calibrated flag where applicable
+                            try:
+                                filter.gyro_bias_yaw = float(old_bias)
+                            except Exception:
+                                pass
+                            try:
+                                filter.gyro_calibrated = bool(old_cal)
+                            except Exception:
+                                pass
+                            # reset timing baseline so new filter initializes cleanly
+                            filter.last_time = None
+                            filter_type = new_type
+                            try:
+                                safe_queue_put(statusQueue, ('filter_type', filter_type), timeout=QUEUE_PUT_TIMEOUT)
+                            except Exception:
+                                pass
+                            log_info(logQueue, "Fusion Worker", f"Switched filter to {filter_type}")
+                            print(f"[Fusion Worker] Switched filter to {filter_type}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error switching filter: {e}")
+                    continue
                 # support control commands: 'reset' and ('set_center_threshold', value)
                 # Accept both bare string commands and tuple/list variants
                 if cmd == 'reset_orientation' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset_orientation'):
                     # Reset orientation state but preserve calibration/bias.
-                    filter.reset()
+                    try:
+                        filter.reset()
+                        # Clear timing baseline so the next update returns a zeroed orientation
+                        filter.last_time = None
+                    except Exception:
+                        try:
+                            filter.reset()
+                        except Exception:
+                            pass
                     log_info(logQueue, "Fusion Worker", "Orientation reset to zero (preserving calibration)")
                     print("[Fusion Worker] Orientation reset to zero (preserving calibration)")
                 elif cmd == 'reset' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset'):

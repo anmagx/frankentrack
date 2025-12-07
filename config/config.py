@@ -8,6 +8,24 @@ Do NOT store runtime state here - this module only defines initial defaults.
 """
 
 # ============================================================================
+# Application Information
+# ============================================================================
+APP_NAME = "frankentrack"
+APP_VERSION = "1.0.0"
+
+# ============================================================================
+# GUI Timing and Updates  
+# ============================================================================
+GUI_UPDATE_INTERVAL_MS = 100         # How often GUI updates displays (milliseconds)
+WORKER_QUEUE_CHECK_INTERVAL_MS = 50  # How often GUI checks queues (milliseconds)
+
+# ============================================================================
+# GUI Backend
+# ============================================================================
+DEFAULT_GUI_BACKEND = 'pyqt'  # Options: 'tkinter', 'pyqt' 
+GUI_BACKEND = DEFAULT_GUI_BACKEND
+
+# ============================================================================
 # Serial Communication
 # ============================================================================
 DEFAULT_SERIAL_PORT = 'COM3'

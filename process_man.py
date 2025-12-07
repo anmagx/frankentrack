@@ -20,6 +20,7 @@ import threading
 import os
 
 # Import config constants
+from config import config
 from config.config import (
     QUEUE_SIZE_DATA,
     QUEUE_SIZE_DISPLAY,
@@ -155,11 +156,14 @@ class ProcessHandler:
         print("[ProcessHandler] Starting workers...")
         
         ## Import worker target here to avoid circular import
-        from workers.gui_wrk import run_worker as run_gui_worker
+        from workers.gui_wrk_launcher import run_worker as run_gui_worker
         from workers.serial_wrk import run_worker as run_serial_worker
         from workers.fusion_wrk import run_worker as run_fusion_worker
         from workers.udp_wrk import run_worker as run_udp_worker
         from workers.camera_wrk import run_worker as run_camera_worker
+
+        # The GUI backend is now determined inside gui_wrk_launcher
+        print(f"[ProcessHandler] GUI backend configured as: {config.GUI_BACKEND}")
 
         ## GUI Worker
         gui_worker = Process(

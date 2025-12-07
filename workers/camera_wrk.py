@@ -284,10 +284,10 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                     # Lazy import providers to avoid importing pseyepy/opencv at module import time
                     try:
                         if backend == 'openCV':
-                            from workers.cameraProvider_openCV import OpenCVCameraProvider
+                            from workers.providers.cameraProvider_openCV import OpenCVCameraProvider
                             provider = OpenCVCameraProvider(target_cam, frame_w, frame_h, desired_fps, logQueue=logQueue)
                         else:
-                            from workers.cameraProvider_pseyepy import PSEyeProvider
+                            from workers.providers.cameraProvider_pseyepy import PSEyeProvider
                             provider = PSEyeProvider(target_cam, frame_w, frame_h, desired_fps, logQueue=logQueue)
                         # If provider failed to open, provider implementations return None-internal state
                         if provider is None:
