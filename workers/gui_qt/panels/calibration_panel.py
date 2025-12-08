@@ -689,6 +689,9 @@ class CalibrationPanelQt(QGroupBox):
         self._x_offset = 0.0
         self._y_offset = 0.0
         self._last_raw_translation = (0.0, 0.0, 0.0)
+        
+        # Initialization flag to prevent duplicate startup messages
+        self._initializing = False
 
         self._build_ui()
         
@@ -984,7 +987,8 @@ class CalibrationPanelQt(QGroupBox):
             if self.control_queue:
                 # Send tuple command: ('set_filter', 'quaternion'|'complementary')
                 safe_queue_put(self.control_queue, ('set_filter', filter_type), timeout=QUEUE_PUT_TIMEOUT)
-                if self.message_callback:
+                # Only log if not during initialization to prevent startup spam
+                if not getattr(self, '_initializing', False) and self.message_callback:
                     QTimer.singleShot(0, lambda msg=f"Filter changed to: {filter_type}": self.message_callback(msg))
         except Exception as ex:
             if self.message_callback:
@@ -1027,7 +1031,8 @@ class CalibrationPanelQt(QGroupBox):
                         self._gamepad_monitor.shortcut_triggered.connect(self._on_reset_orientation)
                         self._gamepad_monitor.start()
                         
-                        if self.message_callback:
+                        # Only log if not during initialization to prevent startup spam
+                        if not getattr(self, '_initializing', False) and self.message_callback:
                             QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
                     except Exception as ex:
                         if self.message_callback:
@@ -1045,7 +1050,8 @@ class CalibrationPanelQt(QGroupBox):
                         # Register new hotkey
                         keyboard.on_press_key(key, lambda _: self._on_reset_orientation())
                         
-                        if self.message_callback:
+                        # Only log if not during initialization to prevent startup spam
+                        if not getattr(self, '_initializing', False) and self.message_callback:
                             QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
                     except Exception as ex:
                         if self.message_callback:
@@ -1091,14 +1097,29 @@ class CalibrationPanelQt(QGroupBox):
         """
         try:
             if calibrated:
-                # Info color for calibrated
+                # Green color for calibrated
                 self.calib_status_label.setText("Gyro: Calibrated")
-                self.calib_status_label.setProperty("status", "info")
+                self.calib_status_label.setProperty("status", "enabled")
                 self.calib_status_label.style().polish(self.calib_status_label)
             else:
-                # Error color for not calibrated
+                # Red color for not calibrated
                 self.calib_status_label.setText("Gyro: Not calibrated")
                 self.calib_status_label.setProperty("status", "error")
+                self.calib_status_label.style().polish(self.calib_status_label)
+        except Exception:
+            pass
+    
+    def update_calibrating_status(self, calibrating):
+        """Update gyro calibrating status with color changes.
+        
+        Args:
+            calibrating: Boolean indicating if gyro calibration is in progress
+        """
+        try:
+            if calibrating:
+                # Yellow color for calibrating in progress
+                self.calib_status_label.setText("Gyro: Calibrating...")
+                self.calib_status_label.setProperty("status", "calibrating")
                 self.calib_status_label.style().polish(self.calib_status_label)
         except Exception:
             pass
@@ -1140,6 +1161,9 @@ class CalibrationPanelQt(QGroupBox):
         """
         if prefs is None:
             return
+        
+        # Set initialization flag to prevent duplicate messages
+        self._initializing = True
         
         # Handle new format (separate yaw, pitch, and roll)
         if 'drift_angle_yaw' in prefs and prefs['drift_angle_yaw']:
@@ -1225,6 +1249,9 @@ class CalibrationPanelQt(QGroupBox):
             # Ensure button shows no shortcut
             if self.reset_button:
                 self.reset_button.setText("Reset Orientation")
+        
+        # Clear initialization flag
+        self._initializing = False
 
     def get_drift_angle_yaw(self):
         """Get current yaw drift angle value.
@@ -1417,16 +1444,34 @@ class CalibrationPanelQt(QGroupBox):
                 self.recal_button.setText("Recalibrate Gyro Bias")
                 # Remove disabled styling
                 self.recal_button.setProperty("status", "")
+                
+                # Restore calibration status when becoming active
+                current_text = self.calib_status_label.text()
+                if "Calibrated" in current_text and "Disabled" in current_text:
+                    self.calib_status_label.setText("Gyro: Calibrated")
+                    self.calib_status_label.setProperty("status", "enabled")
+                elif "Disabled" in current_text:
+                    self.calib_status_label.setText("Gyro: Not calibrated")
+                    self.calib_status_label.setProperty("status", "error")
+                # Note: calibrating status will be set by update_calibrating_status if needed
+                self.calib_status_label.style().polish(self.calib_status_label)
             else:
                 self.recal_button.setText("Recalibrate Gyro Bias")
                 # Apply disabled styling to match serial panel
                 self.recal_button.setProperty("status", "disabled")
-            self.recal_button.style().polish(self.recal_button)
-            
-            # Also update the status label styling when not active
-            if not is_active and self.calib_status_label.text() == "Gyro: Not calibrated":
+                
+                # Update the calibration status label styling when not active
+                current_text = self.calib_status_label.text()
+                if "Calibrated" in current_text:
+                    self.calib_status_label.setText("Gyro: Calibrated (Disabled)")
+                elif "Calibrating" in current_text:
+                    self.calib_status_label.setText("Gyro: Not calibrated (Disabled)")
+                else:
+                    self.calib_status_label.setText("Gyro: Not calibrated (Disabled)")
                 self.calib_status_label.setProperty("status", "disabled")
                 self.calib_status_label.style().polish(self.calib_status_label)
+            
+            self.recal_button.style().polish(self.recal_button)
         except Exception:
             pass
     

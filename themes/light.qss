@@ -155,6 +155,10 @@ QLabel[status="error"] {
     color: #dc3545;
 }
 
+QLabel[status="calibrating"] {
+    color: #ffc107;
+}
+
 QLabel[status="warning"] {
     color: #ffc107;
 }

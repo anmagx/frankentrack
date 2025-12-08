@@ -113,7 +113,7 @@ class TabbedGUIWorker(QMainWindow):
         
         self.load_preferences()
         
-        print("[TabbedGUI] PyQt5 tabbed GUI worker initialized")
+        print("[GUI] PyQt5 tabbed GUI worker initialized")
     
     def setup_ui(self):
         """Setup the main UI with tabbed layout."""
@@ -123,7 +123,7 @@ class TabbedGUIWorker(QMainWindow):
         try:
             set_window_icon(self)
         except Exception as e:
-            print(f"[TabbedGUI] Could not set window icon: {e}")
+            print(f"[GUI] Could not set window icon: {e}")
         
         # Central widget with tab layout
         central_widget = QWidget()
@@ -270,9 +270,9 @@ class TabbedGUIWorker(QMainWindow):
         """Apply the selected theme to the application."""
         try:
             self.theme_manager.load_theme(theme_name)
-            print(f"[TabbedGUI] Applied theme: {theme_name}")
+            print(f"[GUI] Applied theme: {theme_name}")
         except Exception as e:
-            print(f"[TabbedGUI] Error applying theme {theme_name}: {e}")
+            print(f"[GUI] Error applying theme {theme_name}: {e}")
     
     def create_about_tab(self):
         """Create the About tab."""
@@ -537,6 +537,8 @@ class TabbedGUIWorker(QMainWindow):
         try:
             if status_type == 'gyro_calibrated' and hasattr(self.calibration_panel, 'update_calibration_status'):
                 self.calibration_panel.update_calibration_status(bool(value))
+            elif status_type == 'gyro_calibrating' and hasattr(self.calibration_panel, 'update_calibrating_status'):
+                self.calibration_panel.update_calibrating_status(bool(value))
             elif status_type == 'processing' and hasattr(self.calibration_panel, 'update_processing_status'):
                 self.calibration_panel.update_processing_status(str(value))
             elif status_type == 'drift_correction' and hasattr(self.orientation_panel, 'update_drift_status'):
@@ -561,7 +563,7 @@ class TabbedGUIWorker(QMainWindow):
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[TabbedGUI] Error handling status update {status_type}: {e}")
+            print(f"[GUI] Error handling status update {status_type}: {e}")
     
     def _log_message(self, message: str):
         """Log a message to the message panel."""
@@ -600,11 +602,11 @@ class TabbedGUIWorker(QMainWindow):
             
             # Handle both dict and string formats for preferences
             if isinstance(prefs, str):
-                print(f"[TabbedGUI] Preferences returned as string, skipping load")
+                print(f"[GUI] Preferences returned as string, skipping load")
                 return
             
             if not isinstance(prefs, dict):
-                print(f"[TabbedGUI] Unexpected preferences format: {type(prefs)}")
+                print(f"[GUI] Unexpected preferences format: {type(prefs)}")
                 return
             
             # Apply preferences to each panel
@@ -627,10 +629,6 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.preferences_panel, 'load_shortcut_preferences') and 'calibration' in prefs:
                 self.preferences_panel.load_shortcut_preferences(prefs['calibration'])
             
-            # Load shortcut preferences into preferences panel
-            if hasattr(self.preferences_panel, 'load_shortcut_preferences') and 'calibration' in prefs:
-                self.preferences_panel.load_shortcut_preferences(prefs['calibration'])
-            
             # Apply theme preference
             if hasattr(self, 'preferences_manager'):
                 theme_name = self.preferences_manager.get_theme()
@@ -645,14 +643,14 @@ class TabbedGUIWorker(QMainWindow):
                 except (ValueError, TypeError):
                     pass
             
-            print("[TabbedGUI] Preferences loaded")
+            print("[GUI] Preferences loaded")
             
         except Exception as e:
-            print(f"[TabbedGUI] Error loading preferences: {e}")
+            print(f"[GUI] Error loading preferences: {e}")
     
     def closeEvent(self, event):
         """Handle window close event."""
-        print("[TabbedGUI] Close event received")
+        print("[GUI] Close event received")
         
         # Stop processing timer first
         if hasattr(self, 'process_timer'):
@@ -726,144 +724,10 @@ class TabbedGUIWorker(QMainWindow):
             prefs_manager = PreferencesManager()
             prefs_manager.save(prefs)
             
-            print("[TabbedGUI] Preferences saved")
+            print("[GUI] Preferences saved")
             
         except Exception as e:
-            print(f"[TabbedGUI] Error saving preferences: {e}")
-    
-    def closeEvent(self, event):
-        """Handle window close event."""
-        print("[TabbedGUI] Close event received")
-        
-        # Save preferences before closing
-        self.save_preferences()
-        
-        # Stop timers
-        if hasattr(self, 'update_timer'):
-            self.update_timer.stop()
-        if hasattr(self, 'gui_timer'):
-            self.gui_timer.stop()
-        
-        # Signal shutdown
-        if hasattr(self, 'stop_event'):
-            self.stop_event.set()
-        
-        # Call stop callback
-        if self.on_stop_callback:
-            self.on_stop_callback()
-        
-        # Accept close event
-        event.accept()
-
-
-def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_queue,
-                 udp_control_queue, status_queue, ui_status_queue, message_queue,
-                 serial_display_queue=None, euler_display_queue=None,
-                 translation_display_queue=None, camera_preview_queue=None,
-                 log_queue=None, stop_event=None, on_stop_callback=None):
-    """
-    Start the PyQt5 GUI worker with tabbed interface.
-    
-    Args:
-        serial_control_queue: Queue for serial commands
-        fusion_control_queue: Queue for fusion commands
-        camera_control_queue: Queue for camera commands
-        udp_control_queue: Queue for UDP commands
-        status_queue: Queue for receiving status updates
-        message_queue: Queue for receiving messages
-        serial_display_queue: Queue for raw serial data display
-        euler_display_queue: Queue for orientation angles
-        translation_display_queue: Queue for position data
-        camera_preview_queue: Queue for camera preview frames
-        log_queue: Queue for log messages
-        stop_event: Threading event for shutdown coordination
-        on_stop_callback: Callback when GUI is closed
-    """
-    print("[TabbedGUI] Starting PyQt5 tabbed GUI worker...")
-    
-    # Initialize QApplication
-    app = QApplication(sys.argv)
-    app.setApplicationName(f"{APP_NAME} - PyQt5")
-    app.setOrganizationName("frankentrack")
-    
-    # Set application icon for taskbar display
-    try:
-        from workers.gui_qt.managers.icon_helper import set_window_icon
-        from PyQt5.QtGui import QIcon
-        import os
-        
-        # Find icon file
-        start_dir = os.path.dirname(__file__)
-        ico_path = None
-        png_path = None
-        for _ in range(6):
-            candidate_ico = os.path.join(start_dir, '..', '..', 'img', 'icon.ico')
-            candidate_png = os.path.join(start_dir, '..', '..', 'img', 'icon.png')
-            if os.path.exists(candidate_ico):
-                ico_path = candidate_ico
-                break
-            if os.path.exists(candidate_png) and png_path is None:
-                png_path = candidate_png
-            # move up one level
-            parent = os.path.dirname(start_dir)
-            if not parent or parent == start_dir:
-                break
-            start_dir = parent
-        
-        # Set application icon
-        icon_path = ico_path or png_path
-        if icon_path:
-            app_icon = QIcon(icon_path)
-            if not app_icon.isNull():
-                app.setWindowIcon(app_icon)
-                print(f"[TabbedGUI] Application icon set: {icon_path}")
-            else:
-                print(f"[TabbedGUI] Failed to load icon: {icon_path}")
-        else:
-            print("[TabbedGUI] No icon file found")
-            
-    except Exception as e:
-        print(f"[TabbedGUI] Could not set application icon: {e}")
-    
-    # Windows-specific taskbar icon handling
-    try:
-        import platform
-        if platform.system() == "Windows":
-            import ctypes
-            # Set the app ID for proper taskbar grouping
-            app_id = f"frankentrack.{APP_NAME}.{APP_VERSION}"
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-            print(f"[TabbedGUI] Windows AppUserModelID set: {app_id}")
-    except Exception as e:
-        print(f"[TabbedGUI] Could not set Windows app ID: {e}")
-    
-    # Create main window
-    main_window = TabbedGUIWorker(
-        serial_control_queue=serial_control_queue,
-        fusion_control_queue=fusion_control_queue,
-        camera_control_queue=camera_control_queue,
-        udp_control_queue=udp_control_queue,
-        status_queue=status_queue,
-        ui_status_queue=ui_status_queue,
-        message_queue=message_queue,
-        serial_display_queue=serial_display_queue,
-        euler_display_queue=euler_display_queue,
-        translation_display_queue=translation_display_queue,
-        camera_preview_queue=camera_preview_queue,
-        log_queue=log_queue,
-        stop_event=stop_event,
-        on_stop_callback=on_stop_callback
-    )
-    
-    # Show window
-    main_window.show()
-    
-    print("[TabbedGUI] PyQt5 tabbed GUI started")
-    
-    # Run event loop
-    app.exec_()
-    
-    print("[TabbedGUI] PyQt5 tabbed GUI stopped")
+            print(f"[GUI] Error saving preferences: {e}")
 
 
 def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_queue,
@@ -895,23 +759,23 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
     if app is None:
         app = QApplication(sys.argv)
     
-    print("[TabbedGUI] Starting PyQt5 tabbed GUI worker...")
+    print("[GUI] Starting PyQt5 tabbed GUI worker...")
     
-    # Set application icon (same logic as before)
+    # Set application icon
     try:
         icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'img', 'icon.ico'))
         if os.path.exists(icon_path):
             app_icon = QIcon(icon_path)
             if not app_icon.isNull():
                 app.setWindowIcon(app_icon)
-                print(f"[TabbedGUI] Application icon set: {icon_path}")
+                print(f"[GUI] Application icon set: {icon_path}")
             else:
-                print(f"[TabbedGUI] Failed to load icon: {icon_path}")
+                print(f"[GUI] Failed to load icon: {icon_path}")
         else:
-            print("[TabbedGUI] No icon file found")
+            print("[GUI] No icon file found")
             
     except Exception as e:
-        print(f"[TabbedGUI] Could not set application icon: {e}")
+        print(f"[GUI] Could not set application icon: {e}")
     
     # Windows-specific taskbar icon handling
     try:
@@ -921,9 +785,9 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
             # Set the app ID for proper taskbar grouping
             app_id = f"frankentrack.{APP_NAME}.{APP_VERSION}"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-            print(f"[TabbedGUI] Windows AppUserModelID set: {app_id}")
+            print(f"[GUI] Windows AppUserModelID set: {app_id}")
     except Exception as e:
-        print(f"[TabbedGUI] Could not set Windows app ID: {e}")
+        print(f"[GUI] Could not set Windows app ID: {e}")
     
     # Create main window
     main_window = TabbedGUIWorker(
@@ -946,12 +810,40 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
     # Show window
     main_window.show()
     
-    print("[TabbedGUI] PyQt5 tabbed GUI started")
+    print("[GUI] PyQt5 tabbed GUI started")
     
     # Run event loop
     app.exec_()
     
-    print("[TabbedGUI] PyQt5 tabbed GUI stopped")
+    print("[GUI] PyQt5 tabbed GUI stopped")
+
+
+def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event, 
+               eulerDisplayQueue, controlQueue, serialControlQueue, 
+               translationDisplayQueue, cameraControlQueue, cameraPreviewQueue, 
+               udpControlQueue, logQueue, uiStatusQueue):
+    """
+    Compatibility wrapper for the process manager.
+    
+    This function maintains the same interface as the original launcher
+    to ensure compatibility with the existing process manager.
+    """
+    start_gui_worker(
+        serial_control_queue=serialControlQueue,
+        fusion_control_queue=controlQueue,
+        camera_control_queue=cameraControlQueue,
+        udp_control_queue=udpControlQueue,
+        status_queue=statusQueue,
+        ui_status_queue=uiStatusQueue,
+        message_queue=messageQueue,
+        serial_display_queue=serialDisplayQueue,
+        euler_display_queue=eulerDisplayQueue,
+        translation_display_queue=translationDisplayQueue,
+        camera_preview_queue=cameraPreviewQueue,
+        log_queue=logQueue,
+        stop_event=stop_event,
+        on_stop_callback=lambda: stop_event.set()
+    )
 
 
 if __name__ == "__main__":

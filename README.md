@@ -1,8 +1,19 @@
 # Frankentrack
-![gui](img/gui_active_11.png)
+![img](img/gui_orientation.png)
 
 OpenTrack-compatible sensor fusor and UDP sender for 3DOF (Yaw/Pitch/Roll) headtracking, utilizing IMU data sensor fusion (accelerometer and gyroscope). Written in Python. 
-Supports single-point IR-LED tracking for X/Y movement estimation. 
+
+Supports optional single-point IR-LED tracking for X/Y movement estimation. 
+
+## Update v0.13-alpha
+
+⭐ NEW: GUI is now qt-based to support theming (light + dark mode included)
+
+⭐ NEW: Added optional quaternion-based fusion algorithm 
+
+⭐ NEW: Customizable Drift Correction Angles and live visualization
+
+⭐ NEW: Reset Orientation Shortcut can now use buttons from gamepads and other devices (thanks to pygame)
 
 ## What is Frankentrack? 
 
@@ -39,7 +50,7 @@ Nonetheless, thank you Claude.
 * Serial reader for receiving csv-structured IMU Sensor Data
 * Sensor fusion using complementary filter to produce pitch/roll/yaw angles
 * 2-step drift correction procedure for stable viewing angles
-* Single brightspot optical tracking using a webcam to produce X/Y movement
+* Single brightspot optical tracking using a webcam to produce X/Y movement (Optional)
 * General webcam support with openCV, pseyepy (PS3Eye) with basic webcam settings (gain, exposure)
 * UDP sender for sending into opentrack
 * Central log file (Still work in progress)
@@ -86,7 +97,8 @@ Python (3.8 - 3.13.9)
 * OpenCV (for camera handling)
 * Pillow (camera preview handling)
 * pyserial (serial reading)
-* tkinter (gui)
+* pyqt5 (gui)
+* pygame (shortcut support for gamepads)
 
 **Hardware**
 
@@ -116,7 +128,7 @@ In the gui, set your preferred serial port and baud rate and click 'Start'. Make
 
 After a short calibration period the sensor data will be available in the gui. You should next start the gyro bias calibration. After this has finished, the sensor is safe to be moved. If you fix it to your headset, you can recenter your view now and start the UDP sender (on whichever port you've set opentrack to receive in.)
 
-When in game, you should set your preferred drift correction angle with the slider in the gui. More on that setting below. 
+When in game, you should set your preferred drift correction angle with the sliders in the gui. More on that setting below. 
 
 ## Frequently asked Questions (FAQ)
 
@@ -235,12 +247,7 @@ This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for 
 
 ### Third-Party Components
 
-This software incorporates several third-party components with their own licenses:
-
-- **pseyepy**: Apache License 2.0 (Copyright 2017 Ben Deverett) - Modified for Windows compatibility
-- **libusb-1.0**: LGPL v2.1 - Dynamically linked for USB device communication
-
-See [NOTICE](NOTICE) for complete attribution and license information.
+This software incorporates several third-party components with their own licenses. See the about tab in the program for full attribution. 
 
 ## Support
 

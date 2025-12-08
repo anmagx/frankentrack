@@ -240,7 +240,7 @@ class ProcessHandler:
         print("[ProcessHandler] Starting workers...")
         
         ## Import worker target here to avoid circular import
-        from workers.gui_wrk_launcher import run_worker as run_gui_worker
+        from workers.gui_wrk import run_worker as run_gui_worker
         from workers.serial_wrk import run_worker as run_serial_worker
         from workers.fusion_wrk import run_worker as run_fusion_worker
         from workers.udp_wrk import run_worker as run_udp_worker

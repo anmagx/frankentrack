@@ -318,6 +318,7 @@ class CameraPanelQt(QGroupBox):
             'pseyepy': []
         }
         self._current_preview_pixmap = None  # Store QPixmap reference
+        self._initializing = False  # Flag to prevent duplicate startup messages
         
         # Persistent variables for preferences
         self.thresh_var = DEFAULT_DETECTION_THRESHOLD
@@ -661,7 +662,9 @@ class CameraPanelQt(QGroupBox):
         # Also send current camera params so new camera is initialized correctly
         self._on_cam_params_changed()
         
-        self._log_message(f"Camera {idx} selected")
+        # Only log if not during initialization to prevent startup spam
+        if not getattr(self, '_initializing', False):
+            self._log_message(f"Camera {idx} selected")
     
     def _on_cam_params_changed(self):
         """Send current FPS/resolution selection to camera worker."""
@@ -693,7 +696,9 @@ class CameraPanelQt(QGroupBox):
             ('set_backend', key),
             timeout=QUEUE_PUT_TIMEOUT
         )
-        self._log_message(f"Camera backend set to {backend_text}")
+        # Only log if not during initialization to prevent startup spam
+        if not getattr(self, '_initializing', False):
+            self._log_message(f"Camera backend set to {backend_text}")
 
         # Update camera selector to use cached list for this backend (or a safe default)
         try:
@@ -807,6 +812,9 @@ class CameraPanelQt(QGroupBox):
         Args:
             prefs: Dictionary with camera preferences
         """
+        # Set initialization flag to prevent duplicate messages
+        self._initializing = True
+        
         # Restore per-backend cached camera lists first
         try:
             cams_opencv_str = prefs.get('cameras_opencv', '')
@@ -886,9 +894,12 @@ class CameraPanelQt(QGroupBox):
         # Send initial camera settings to worker
         # Notify backend first so camera init uses correct driver
         try:
+            # Temporarily block signals to prevent duplicate messages
+            self.backend_cb.blockSignals(True)
             self._on_backend_selected(self.backend_cb.currentText())
+            self.backend_cb.blockSignals(False)
         except Exception:
-            pass
+            self.backend_cb.blockSignals(False)
 
         # Restore saved camera selection if it exists for the current cached list
         try:
@@ -899,9 +910,12 @@ class CameraPanelQt(QGroupBox):
 
         # Now notify the worker of camera selection and params
         try:
+            # Temporarily block signals to prevent duplicate messages  
+            self.camera_cb.blockSignals(True)
             self._on_camera_selected(self.camera_cb.currentText())
+            self.camera_cb.blockSignals(False)
         except Exception:
-            pass
+            self.camera_cb.blockSignals(False)
         self._on_cam_params_changed()
         # Apply threshold through queue
         safe_queue_put(
@@ -909,6 +923,9 @@ class CameraPanelQt(QGroupBox):
             ('set_thresh', self.thresh_var),
             timeout=QUEUE_PUT_TIMEOUT
         )
+        
+        # Clear initialization flag
+        self._initializing = False
     
     def is_position_tracking_enabled(self) -> bool:
         """Check if position tracking is currently enabled.

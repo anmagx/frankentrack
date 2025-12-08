@@ -713,6 +713,13 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         else:
                             log_info(logQueue, "Fusion Worker", f"Recalibrating gyro yaw bias with {n_samples} samples")
                             print(f"[Fusion Worker] Recalibrating gyro yaw bias ({n_samples} samples)...")
+                            
+                            # Notify GUI that calibration is starting
+                            try:
+                                safe_queue_put(statusQueue, ('gyro_calibrating', True), timeout=QUEUE_PUT_TIMEOUT)
+                            except Exception:
+                                pass
+                            
                             samples = []
                             last_ts = None
                             while len(samples) < n_samples and not stop_event.is_set():
@@ -739,6 +746,7 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                                 # Mark filter as calibrated and notify GUI
                                 filter.gyro_calibrated = True
                                 try:
+                                    safe_queue_put(statusQueue, ('gyro_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
                                     safe_queue_put(statusQueue, ('gyro_calibrated', True), timeout=QUEUE_PUT_TIMEOUT)
                                 except Exception:
                                     pass
@@ -747,6 +755,7 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                             else:
                                 filter.gyro_calibrated = False
                                 try:
+                                    safe_queue_put(statusQueue, ('gyro_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
                                     safe_queue_put(statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
                                 except Exception:
                                     pass

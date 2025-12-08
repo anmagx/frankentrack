@@ -1,5 +1,5 @@
 import sys
-from process_man import ProcessHandler
+from workers.process_man import ProcessHandler
 
 # Require Python 3.8 or higher
 if sys.version_info < (3, 8):

@@ -446,7 +446,9 @@ class PreferencesPanel(QWidget):
                 # Apply to calibration panel to register the hotkey
                 if self.calibration_panel:
                     from PyQt5.QtCore import QTimer
-                    QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut(shortcut, display_name))
+                    # Check if calibration panel is initializing to prevent duplicate messages
+                    if not getattr(self.calibration_panel, '_initializing', False):
+                        QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut(shortcut, display_name))
             except Exception:
                 pass
         else:
@@ -456,7 +458,9 @@ class PreferencesPanel(QWidget):
             # Ensure calibration panel also has no shortcut
             if self.calibration_panel:
                 from PyQt5.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut("None", "None"))
+                # Check if calibration panel is initializing to prevent duplicate messages
+                if not getattr(self.calibration_panel, '_initializing', False):
+                    QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut("None", "None"))
     
     def get_shortcut_preferences(self):
         """Get shortcut preferences for saving."""
