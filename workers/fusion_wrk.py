@@ -33,7 +33,7 @@ from util.error_utils import (
 class ComplementaryFilter:
     """Complementary filter for orientation estimation using gyro and accel."""
     
-    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, logQueue=None):
+    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, center_threshold_yaw=None, center_threshold_pitch=None, center_threshold_roll=None, logQueue=None):
         """
         Initialize the complementary filter.
         
@@ -41,8 +41,10 @@ class ComplementaryFilter:
             accel_threshold: Only apply drift correction when total accel is within
                            this threshold of 1g (e.g., 0.15 means 0.85-1.15g).
                            This prevents correction during movement.
-            center_threshold: All angles must be within this many degrees of 0 
-                            to enable drift correction.
+            center_threshold: Default threshold for all axes (backward compatibility)
+            center_threshold_yaw: Yaw-specific threshold (overrides center_threshold if provided)
+            center_threshold_pitch: Pitch-specific threshold (overrides center_threshold if provided)
+            center_threshold_roll: Roll-specific threshold (overrides center_threshold if provided)
         """
         # Gyro weight for complementary filter on roll/pitch (0..1).
         # Values <1 allow accelerometer to gently correct long-term drift.
@@ -51,6 +53,13 @@ class ComplementaryFilter:
         self.alpha_yaw = ALPHA_YAW  # From config
         self.alpha_drift = ALPHA_DRIFT_CORRECTION  # From config
         self.accel_threshold = accel_threshold
+        
+        # Use separate thresholds if provided, otherwise use default for all
+        self.center_threshold_yaw = center_threshold_yaw if center_threshold_yaw is not None else center_threshold
+        self.center_threshold_pitch = center_threshold_pitch if center_threshold_pitch is not None else center_threshold
+        self.center_threshold_roll = center_threshold_roll if center_threshold_roll is not None else center_threshold
+        
+        # Keep backward compatibility
         self.center_threshold = center_threshold
         # Gyro bias for yaw (deg/s). This is set at startup by calibration
         # (if enabled) and is applied as a static correction during runtime.
@@ -163,9 +172,9 @@ class ComplementaryFilter:
             diff = (a - b + 180) % 360 - 180
             return abs(diff)
         
-        is_near_center = (_angle_diff(self.yaw, 0) < self.center_threshold and 
-                         _angle_diff(self.pitch, 0) < self.center_threshold and
-                         _angle_diff(self.roll, 0) < self.center_threshold)
+        is_near_center = (_angle_diff(self.yaw, 0) < self.center_threshold_yaw and 
+                         _angle_diff(self.pitch, 0) < self.center_threshold_pitch and
+                         _angle_diff(self.roll, 0) < self.center_threshold_roll)
         
         # Apply drift correction to all axes when stationary and near center
         drift_correction_active = False
@@ -237,12 +246,19 @@ class QuaternionComplementaryFilter:
     correction.
     """
 
-    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, logQueue=None):
+    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, center_threshold_yaw=None, center_threshold_pitch=None, center_threshold_roll=None, logQueue=None):
         self.alpha_roll = ALPHA_ROLL
         self.alpha_pitch = ALPHA_PITCH
         self.alpha_yaw = ALPHA_YAW
         self.alpha_drift = ALPHA_DRIFT_CORRECTION
         self.accel_threshold = accel_threshold
+        
+        # Use separate thresholds if provided, otherwise use default for all
+        self.center_threshold_yaw = center_threshold_yaw if center_threshold_yaw is not None else center_threshold
+        self.center_threshold_pitch = center_threshold_pitch if center_threshold_pitch is not None else center_threshold
+        self.center_threshold_roll = center_threshold_roll if center_threshold_roll is not None else center_threshold
+        
+        # Keep backward compatibility
         self.center_threshold = center_threshold
         self.gyro_bias_yaw = 0.0
         self.gyro_calibrated = False
@@ -384,9 +400,9 @@ class QuaternionComplementaryFilter:
         def _angle_diff(a, b):
             diff = (a - b + 180) % 360 - 180
             return abs(diff)
-        is_near_center = (_angle_diff(yaw_est, 0) < self.center_threshold and
-                          _angle_diff(pitch_est, 0) < self.center_threshold and
-                          _angle_diff(roll_est, 0) < self.center_threshold)
+        is_near_center = (_angle_diff(yaw_est, 0) < self.center_threshold_yaw and
+                          _angle_diff(pitch_est, 0) < self.center_threshold_pitch and
+                          _angle_diff(roll_est, 0) < self.center_threshold_roll)
 
         drift_active = False
         if is_stationary and is_near_center:
@@ -421,7 +437,7 @@ class QuaternionComplementaryFilter:
     
 
 
-def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQueue, stop_event, logQueue=None):
+def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQueue, stop_event, logQueue=None, uiStatusQueue=None):
     """
     Fusion worker that reads IMU data from serialQueue and outputs Euler angles to eulerQueue.
     """
@@ -451,12 +467,16 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     try:
         filter.gyro_calibrated = False
         safe_queue_put(statusQueue, ('gyro_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+        safe_queue_put(statusQueue, ('processing', 'inactive'), timeout=QUEUE_PUT_TIMEOUT)
     except Exception:
         # Best-effort: don't block startup if statusQueue is unavailable
         pass
     
     # Translation values (not used, set to 0)
     x, y, z = 0.0, 0.0, 0.0
+    
+    # Track processing state to avoid spam
+    processing_active = False
     
     try:
         while not stop_event.is_set():
@@ -481,14 +501,31 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if new_type != filter_type:
                             old_bias = getattr(filter, 'gyro_bias_yaw', 0.0)
                             old_cal = getattr(filter, 'gyro_calibrated', False)
+                            old_thresh_yaw = getattr(filter, 'center_threshold_yaw', DEFAULT_CENTER_THRESHOLD)
+                            old_thresh_pitch = getattr(filter, 'center_threshold_pitch', DEFAULT_CENTER_THRESHOLD)
+                            old_thresh_roll = getattr(filter, 'center_threshold_roll', DEFAULT_CENTER_THRESHOLD)
+                            
                             filter = _create_filter(new_type)
-                            # preserve bias/calibrated flag where applicable
+                            
+                            # preserve bias/calibrated flag and separate thresholds where applicable
                             try:
                                 filter.gyro_bias_yaw = float(old_bias)
                             except Exception:
                                 pass
                             try:
                                 filter.gyro_calibrated = bool(old_cal)
+                            except Exception:
+                                pass
+                            try:
+                                filter.center_threshold_yaw = float(old_thresh_yaw)
+                            except Exception:
+                                pass
+                            try:
+                                filter.center_threshold_pitch = float(old_thresh_pitch)
+                            except Exception:
+                                pass
+                            try:
+                                filter.center_threshold_roll = float(old_thresh_roll)
                             except Exception:
                                 pass
                             # reset timing baseline so new filter initializes cleanly
@@ -563,12 +600,82 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         new_val = float(cmd[1])
                         if 0.0 <= new_val <= 180.0:  # Sanity check
                             filter.center_threshold = new_val
+                            # Update all thresholds for backward compatibility
+                            filter.center_threshold_yaw = new_val
+                            filter.center_threshold_pitch = new_val
+                            filter.center_threshold_roll = new_val
                             log_info(logQueue, "Fusion Worker", f"Center threshold updated to {new_val}")
                             print(f"[Fusion Worker] Center threshold updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid center threshold: {new_val}")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting center threshold: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_center_threshold_yaw':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 180.0:  # Sanity check
+                            filter.center_threshold_yaw = new_val
+                            log_info(logQueue, "Fusion Worker", f"Yaw center threshold updated to {new_val}")
+                            print(f"[Fusion Worker] Yaw center threshold updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid yaw center threshold: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting yaw center threshold: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_center_threshold_pitch':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 180.0:  # Sanity check
+                            filter.center_threshold_pitch = new_val
+                            log_info(logQueue, "Fusion Worker", f"Pitch center threshold updated to {new_val}")
+                            print(f"[Fusion Worker] Pitch center threshold updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid pitch center threshold: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting pitch center threshold: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_center_threshold_roll':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 180.0:  # Sanity check
+                            filter.center_threshold_roll = new_val
+                            log_info(logQueue, "Fusion Worker", f"Roll center threshold updated to {new_val}")
+                            print(f"[Fusion Worker] Roll center threshold updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid roll center threshold: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting roll center threshold: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_alpha_yaw':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 1.0:  # Alpha values must be between 0 and 1
+                            filter.alpha_yaw = new_val
+                            log_info(logQueue, "Fusion Worker", f"Alpha yaw updated to {new_val}")
+                            print(f"[Fusion Worker] Alpha yaw updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid alpha yaw: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting alpha yaw: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_alpha_pitch':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 1.0:  # Alpha values must be between 0 and 1
+                            filter.alpha_pitch = new_val
+                            log_info(logQueue, "Fusion Worker", f"Alpha pitch updated to {new_val}")
+                            print(f"[Fusion Worker] Alpha pitch updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid alpha pitch: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting alpha pitch: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_alpha_roll':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 <= new_val <= 1.0:  # Alpha values must be between 0 and 1
+                            filter.alpha_roll = new_val
+                            log_info(logQueue, "Fusion Worker", f"Alpha roll updated to {new_val}")
+                            print(f"[Fusion Worker] Alpha roll updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid alpha roll: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting alpha roll: {e}")
                 elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'recalibrate_gyro_bias') or cmd == ('recalibrate_gyro_bias',):
                     # Runtime recalibration request. Optional second element: number of samples
                     try:
@@ -641,21 +748,45 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                 # Update filter
                 yaw, pitch, roll, drift_active, is_stationary = filter.update(gyro, accel, timestamp)
                 
-                # Send drift correction status to UI
-                safe_queue_put(statusQueue, ('drift_correction', drift_active), 
-                             timeout=QUEUE_PUT_TIMEOUT)
-                # Send stationarity status to UI (used by UI to show moving/stationary)
-                safe_queue_put(statusQueue, ('stationary', is_stationary), timeout=QUEUE_PUT_TIMEOUT)
+                # Send processing status to UI only when transitioning from inactive to active
+                if not processing_active:
+                    try:
+                        if uiStatusQueue:
+                            safe_queue_put(uiStatusQueue, ('processing', 'active'), timeout=QUEUE_PUT_TIMEOUT)
+                        processing_active = True
+                    except Exception as e:
+                        print(f"[Fusion Worker] Failed to send UI processing status: {e}")
+                        pass
+                
+                # Send drift correction status to UI (non-blocking)
+                try:
+                    statusQueue.put_nowait(('drift_correction', drift_active))
+                except:
+                    pass
+                # Send stationarity status to UI (non-blocking)
+                try:
+                    statusQueue.put_nowait(('stationary', is_stationary))
+                except:
+                    pass
                 
                 # Put Euler angles into output queues
                 # Format: [Yaw, Pitch, Roll, X, Y, Z]
                 euler_data = [yaw, pitch, roll, x, y, z]
 
-                # Publish to main euler queue (for UDP) and eulerDisplayQueue (for GUI)
-                safe_queue_put(eulerQueue, euler_data, timeout=QUEUE_PUT_TIMEOUT)
+                # Publish to main euler queue (for UDP) - non-blocking for real-time
+                try:
+                    eulerQueue.put_nowait(euler_data)
+                except:
+                    # Drop frame if queue full rather than blocking
+                    pass
                 
                 if eulerDisplayQueue is not None:
-                    safe_queue_put(eulerDisplayQueue, euler_data, timeout=QUEUE_PUT_TIMEOUT)
+                    try:
+                        # Use nowait() to ensure GUI never blocks real-time data
+                        eulerDisplayQueue.put_nowait(euler_data)
+                    except:
+                        # Drop frame if GUI queue full rather than blocking
+                        pass
                 
             except ValueError as e:
                 # Skip malformed/invalid lines (parse_imu_line raises ValueError)
@@ -668,5 +799,12 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     except KeyboardInterrupt:
         pass
     finally:
+        # Send processing inactive status when stopping
+        try:
+            if uiStatusQueue:
+                safe_queue_put(uiStatusQueue, ('processing', 'inactive'), timeout=QUEUE_PUT_TIMEOUT)
+            processing_active = False
+        except Exception:
+            pass
         log_info(logQueue, "Fusion Worker", "Stopped")
         print("[Fusion Worker] Stopped.")

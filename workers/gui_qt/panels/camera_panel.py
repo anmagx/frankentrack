@@ -27,7 +27,7 @@ from config.config import (
     QUEUE_PUT_TIMEOUT
 )
 from util.error_utils import safe_queue_put
-from workers.gui.managers.preferences_manager import PreferencesManager
+from workers.gui_qt.managers.preferences_manager import PreferencesManager
 
 try:
     from PIL import Image
@@ -57,23 +57,16 @@ class CameraEnumerationThread(QThread):
             if self.backend == 'pseyepy' or 'pseyepy' in self.backend.lower():
                 try:
                     import pseyepy
-                    n = 0
-                    try:
-                        # pseyepy.cam_count() typically returns number of attached PS3Eye cameras
-                        n = int(pseyepy.cam_count())
-                    except Exception:
-                        # Some pseyepy builds may expose different API names; try cameras()
-                        try:
-                            n = int(len(pseyepy.cameras()))
-                        except Exception:
-                            n = 0
+                    # pseyepy.cam_count() returns number of attached PS3Eye cameras
+                    n = int(pseyepy.cam_count())
                     if n > 0:
-                        cams = [f"Camera {i}" for i in range(n)]
+                        cams = [f"PS3Eye Camera {i}" for i in range(n)]
                         self.cameras_found.emit(cams)
                         self.enumeration_finished.emit()
                         return
-                except Exception:
+                except Exception as e:
                     # Fall back to OpenCV probe if pseyepy import or cam_count fails
+                    print(f"pseyepy enumeration failed: {e}")
                     pass
         except Exception:
             pass
@@ -126,6 +119,51 @@ class CameraOptionsDialog(QDialog):
         self.setWindowTitle('Camera Options')
         self.setModal(True)
         self.setFixedSize(320, 200)
+        
+        # Apply dark mode styling if parent uses dark theme
+        if parent:
+            # Check if parent is using dark theme by examining background color
+            bg_color = parent.palette().color(parent.backgroundRole())
+            is_dark = bg_color.value() < 128
+            
+            if is_dark:
+                # Apply dark theme stylesheet
+                dark_style = """
+                QDialog {
+                    background-color: #2b2b2b;
+                    color: #ffffff;
+                }
+                QLabel {
+                    color: #ffffff;
+                    background-color: transparent;
+                }
+                QSlider::groove:horizontal {
+                    background-color: #555555;
+                    height: 8px;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background-color: #ffffff;
+                    width: 16px;
+                    margin: -4px 0;
+                    border-radius: 8px;
+                }
+                QSlider::sub-page:horizontal {
+                    background-color: #0078d4;
+                    border-radius: 4px;
+                }
+                QPushButton {
+                    background-color: #404040;
+                    color: #ffffff;
+                    border: 1px solid #606060;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #505050;
+                }
+                """
+                self.setStyleSheet(dark_style)
         
         self.thresh_var = thresh_var
         self.exposure_var = exposure_var
@@ -344,7 +382,13 @@ class CameraPanelQt(QGroupBox):
         
         layout.addWidget(camera_row)
 
-        # Preview canvas
+        # Main row: Preview + Controls side by side
+        main_row = QFrame()
+        main_layout = QHBoxLayout(main_row)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(12)
+        
+        # Left: Preview canvas
         preview_frame = QFrame()
         preview_frame.setFrameStyle(QFrame.Panel | QFrame.Sunken)
         preview_frame.setLineWidth(1)
@@ -359,62 +403,58 @@ class CameraPanelQt(QGroupBox):
         self._draw_preview_disabled()
         preview_layout.addWidget(self.preview_label)
         
-        layout.addWidget(preview_frame)
-
-        # FPS / Resolution row
-        params_row = QFrame()
-        params_layout = QHBoxLayout(params_row)
-        params_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(preview_frame)
         
-        # Center the FPS/Resolution controls
-        params_layout.addStretch()
+        # Right: Controls panel
+        controls_frame = QFrame()
+        controls_layout = QVBoxLayout(controls_frame)
+        controls_layout.setContentsMargins(8, 8, 8, 8)
+        controls_layout.setSpacing(12)
         
+        # FPS control
+        fps_row = QHBoxLayout()
         fps_label = QLabel("FPS:")
-        params_layout.addWidget(fps_label)
+        fps_row.addWidget(fps_label)
         
         self.fps_cb = QComboBox()
         self.fps_cb.addItems(['15', '30', '60', '90', '120'])
         self.fps_cb.setCurrentText(str(DEFAULT_CAMERA_FPS))
         self.fps_cb.currentTextChanged.connect(self._on_cam_params_changed)
-        params_layout.addWidget(self.fps_cb)
+        fps_row.addWidget(self.fps_cb)
+        fps_row.addStretch()
         
+        controls_layout.addLayout(fps_row)
+        
+        # Resolution control
+        res_row = QHBoxLayout()
         res_label = QLabel("Resolution:")
-        params_layout.addWidget(res_label)
+        res_row.addWidget(res_label)
         
         self.res_cb = QComboBox()
         self.res_cb.addItems(['320x240', '640x480', '1280x720', '1920x1080'])
         self.res_cb.setCurrentText(f"{DEFAULT_CAMERA_WIDTH}x{DEFAULT_CAMERA_HEIGHT}")
         self.res_cb.currentTextChanged.connect(self._on_cam_params_changed)
-        params_layout.addWidget(self.res_cb)
+        res_row.addWidget(self.res_cb)
+        res_row.addStretch()
         
-        params_layout.addStretch()
-        layout.addWidget(params_row)
-
+        controls_layout.addLayout(res_row)
+        
         # Preview toggle button
-        preview_btn_row = QFrame()
-        preview_btn_layout = QHBoxLayout(preview_btn_row)
-        preview_btn_layout.setContentsMargins(0, 0, 0, 0)
-        preview_btn_layout.addStretch()
-        
         self.preview_btn = QPushButton("Enable Preview")
         self.preview_btn.clicked.connect(self.toggle_preview)
-        preview_btn_layout.addWidget(self.preview_btn)
+        controls_layout.addWidget(self.preview_btn)
         
-        preview_btn_layout.addStretch()
-        layout.addWidget(preview_btn_row)
-
         # Position tracking button
-        pos_row = QFrame()
-        pos_layout = QHBoxLayout(pos_row)
-        pos_layout.setContentsMargins(0, 0, 0, 0)
-        pos_layout.addStretch()
-        
         self.pos_btn = QPushButton("Start Position Tracking")
         self.pos_btn.clicked.connect(self.toggle_position_tracking)
-        pos_layout.addWidget(self.pos_btn)
+        controls_layout.addWidget(self.pos_btn)
         
-        pos_layout.addStretch()
-        layout.addWidget(pos_row)
+        # Add stretch to push controls to top
+        controls_layout.addStretch()
+        
+        main_layout.addWidget(controls_frame)
+        
+        layout.addWidget(main_row)
         
     def _open_options_dialog(self):
         """Open a modal Options dialog for threshold/exposure/gain."""
@@ -498,23 +538,43 @@ class CameraPanelQt(QGroupBox):
             self.res_cb.setEnabled(True)
             self.enumerate_btn.setEnabled(True)
     
-    def update_preview(self, jpeg_data: bytes):
+    def update_preview(self, jpeg_data):
         """Update the preview display with new JPEG image data.
         
         Args:
-            jpeg_data: JPEG-encoded image bytes from camera worker
+            jpeg_data: JPEG-encoded image bytes from camera worker or tuple containing bytes
         """
         if not self.preview_enabled:
             return
         
         if Image is None or io is None:
+            print("[CameraPanelQt] PIL not available for preview update")
             return
         
         try:
-            # Convert JPEG bytes to PIL Image
-            img = Image.open(io.BytesIO(jpeg_data))
+            # Handle both tuple format (legacy) and direct bytes
+            if isinstance(jpeg_data, tuple):
+                # Extract bytes from tuple - typically first element
+                if len(jpeg_data) > 0:
+                    jpeg_bytes = jpeg_data[0]
+                else:
+                    print("[CameraPanelQt] Empty tuple received for preview")
+                    return
+            else:
+                jpeg_bytes = jpeg_data
             
-            # Convert PIL Image to QPixmap
+            # Ensure we have bytes
+            if not isinstance(jpeg_bytes, bytes):
+                print(f"[CameraPanelQt] Expected bytes, got {type(jpeg_bytes)}")
+                return
+            
+            # Convert JPEG bytes to PIL Image
+            img = Image.open(io.BytesIO(jpeg_bytes))
+            
+            # Convert PIL Image to QPixmap using RGB format
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
             img_data = img.tobytes("raw", "RGB")
             qimg = QImage(img_data, img.width, img.height, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimg)
@@ -526,13 +586,27 @@ class CameraPanelQt(QGroupBox):
                     Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
             
-            # Store reference and update display
-            self._current_preview_pixmap = pixmap
-            self.preview_label.setPixmap(pixmap)
+            # Use QTimer.singleShot to ensure GUI update happens in main thread
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._update_preview_display(pixmap))
             
         except Exception as e:
-            # Don't spam errors for preview updates
-            pass
+            # Log specific error for debugging
+            try:
+                print(f"[CameraPanelQt] Preview update error: {e}")
+            except:
+                pass
+    
+    def _update_preview_display(self, pixmap):
+        """Update preview display in main thread."""
+        try:
+            self._current_preview_pixmap = pixmap
+            self.preview_label.setPixmap(pixmap)
+        except Exception as e:
+            try:
+                print(f"[CameraPanelQt] Preview display error: {e}")
+            except:
+                pass
 
     def _draw_preview_disabled(self):
         """Draw preview disabled text on the preview label."""

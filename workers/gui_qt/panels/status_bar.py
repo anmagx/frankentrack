@@ -8,14 +8,14 @@ Displays real-time statistics at the bottom of the window:
 - Camera FPS: Camera frames per second
 """
 
-from PyQt5.QtWidgets import QFrame, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy
+from PyQt5.QtWidgets import QGroupBox, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from .base_panel import BasePanelQt
 
 
-class StatusBarQt(QFrame):
+class StatusBarQt(QGroupBox):
     """PyQt status bar displaying real-time performance metrics."""
     
     def __init__(self, parent, relief="sunken"):
@@ -24,17 +24,9 @@ class StatusBarQt(QFrame):
         
         Args:
             parent: Parent PyQt widget (typically the main window)
-            relief: Border style (default: "sunken" - maps to QFrame.Sunken)
+            relief: Border style (not used with QGroupBox, kept for compatibility)
         """
-        super().__init__(parent)
-        
-        # Set frame style to match tkinter relief
-        if relief == "sunken":
-            self.setFrameStyle(QFrame.StyledPanel | QFrame.Sunken)
-        elif relief == "raised":
-            self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        else:
-            self.setFrameStyle(QFrame.StyledPanel)
+        super().__init__("Status", parent)
         
         # Status values (same as tkinter version)
         self._msg_rate_text = "0 msg/s"

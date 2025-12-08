@@ -9,7 +9,7 @@ import os
 import configparser
 from typing import Dict, Optional
 
-from config.config import PREFS_FILE_NAME
+from config.config import PREFS_FILE_NAME, DEFAULT_THEME
 
 
 class PreferencesManager:
@@ -38,10 +38,10 @@ class PreferencesManager:
         if config_dir:
             return os.path.join(config_dir, PREFS_FILE_NAME)
         
-        # Auto-detect: go up from workers/gui/managers to project root
+        # Auto-detect: go up from workers/gui_qt/managers to project root
         try:
-            current = os.path.dirname(__file__)  # .../workers/gui/managers
-            workers_gui = os.path.dirname(current)  # .../workers/gui
+            current = os.path.dirname(__file__)  # .../workers/gui_qt/managers
+            workers_gui = os.path.dirname(current)  # .../workers/gui_qt
             workers = os.path.dirname(workers_gui)  # .../workers
             project_root = os.path.dirname(workers)  # .../frankentrack
             cfg_dir = os.path.join(project_root, 'config')
@@ -63,8 +63,8 @@ class PreferencesManager:
         """Load preferences from config file.
         
         Returns:
-            Dictionary of preference key-value pairs from [gui] section.
-            Returns empty dict if file doesn't exist or can't be read.
+            Dictionary of preference key-value pairs.
+            Returns nested structure for PyQt5 compatibility.
         """
         if not os.path.exists(self.config_path):
             return {}
@@ -72,11 +72,13 @@ class PreferencesManager:
         cfg = configparser.ConfigParser()
         try:
             cfg.read(self.config_path)
-            if 'gui' not in cfg:
-                return {}
             
-            # Convert ConfigParser section to plain dict
-            return dict(cfg['gui'])
+            # Convert all sections to nested dict structure for PyQt5
+            result = {}
+            for section_name in cfg.sections():
+                result[section_name] = dict(cfg[section_name])
+            
+            return result
         except Exception as e:
             print(f"[PreferencesManager] Error loading preferences: {e}")
             return {}
@@ -85,13 +87,24 @@ class PreferencesManager:
         """Save preferences to config file using atomic write.
         
         Args:
-            preferences: Dictionary of preference key-value pairs to save
+            preferences: Dictionary of preference key-value pairs to save.
+                        Can be nested (PyQt5 format) or flat (legacy format)
             
         Returns:
             True if save succeeded, False otherwise
         """
         cfg = configparser.ConfigParser()
-        cfg['gui'] = {str(k): str(v) for k, v in preferences.items()}
+        
+        # Handle nested preference structure (PyQt5 format)
+        for section_name, section_data in preferences.items():
+            if isinstance(section_data, dict):
+                # Nested format - create section
+                cfg[section_name] = {str(k): str(v) for k, v in section_data.items()}
+            else:
+                # Flat format - put in 'gui' section for backward compatibility
+                if 'gui' not in cfg:
+                    cfg['gui'] = {}
+                cfg['gui'][str(section_name)] = str(section_data)
         
         tmp_path = self.config_path + '.tmp'
         
@@ -200,3 +213,29 @@ class PreferencesManager:
             True if config file exists
         """
         return os.path.exists(self.config_path)
+    
+    # Theme-specific convenience methods
+    def get_theme(self) -> str:
+        """Get current theme preference.
+        
+        Returns:
+            Current theme name ('light' or 'dark')
+        """
+        prefs = self.load()
+        gui_prefs = prefs.get('gui', {})
+        return gui_prefs.get('theme', DEFAULT_THEME)
+    
+    def set_theme(self, theme_name: str) -> bool:
+        """Set theme preference.
+        
+        Args:
+            theme_name: Theme name ('light' or 'dark')
+            
+        Returns:
+            True if save succeeded
+        """
+        prefs = self.load()
+        if 'gui' not in prefs:
+            prefs['gui'] = {}
+        prefs['gui']['theme'] = theme_name
+        return self.save(prefs)

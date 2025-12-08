@@ -61,6 +61,7 @@ class ProcessHandler:
         self.controlQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
         self.serialControlQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
         self.statusQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
+        self.uiStatusQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)  # Dedicated UI status queue
         self.logQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
         
         ## Init stop event
@@ -162,9 +163,6 @@ class ProcessHandler:
         from workers.udp_wrk import run_worker as run_udp_worker
         from workers.camera_wrk import run_worker as run_camera_worker
 
-        # The GUI backend is now determined inside gui_wrk_launcher
-        print(f"[ProcessHandler] GUI backend configured as: {config.GUI_BACKEND}")
-
         ## GUI Worker
         gui_worker = Process(
             target = run_gui_worker,
@@ -172,7 +170,7 @@ class ProcessHandler:
                    self.stop_event, self.eulerDisplayQueue, self.controlQueue, 
                    self.serialControlQueue, self.translationDisplayQueue, 
                    self.cameraControlQueue, self.cameraPreviewQueue, 
-                   self.udpControlQueue, self.logQueue),
+                   self.udpControlQueue, self.logQueue, self.uiStatusQueue),
             name = "GUIWorker"
         )
         gui_worker.start()
@@ -183,7 +181,7 @@ class ProcessHandler:
             target = run_serial_worker,
             args = (self.messageQueue, self.serialQueue, self.serialDisplayQueue, 
                    self.stop_event, self.serialControlQueue, self.statusQueue, 
-                   self.logQueue),
+                   self.logQueue, self.uiStatusQueue), 
             name = "SerialWorker"
         )
         serial_worker.start()
@@ -194,7 +192,7 @@ class ProcessHandler:
             target = run_fusion_worker,
             args = (self.serialQueue, self.eulerQueue, self.eulerDisplayQueue, 
                    self.controlQueue, self.statusQueue, self.stop_event, 
-                   self.logQueue),
+                   self.logQueue, self.uiStatusQueue),
             name = "FusionWorker"
         )
         fusion_worker.start()

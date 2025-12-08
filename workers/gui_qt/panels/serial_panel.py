@@ -6,7 +6,7 @@ Provides controls for serial port selection, baud rate configuration,
 and start/stop functionality.
 """
 
-from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QComboBox, QPushButton, 
+from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QPushButton, 
                              QFrame, QGridLayout, QSizePolicy)
 from PyQt5.QtCore import pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
@@ -42,53 +42,69 @@ class SerialPanelQt(BasePanelQt):
         self._port_value = DEFAULT_SERIAL_PORT
         self._baud_value = str(DEFAULT_SERIAL_BAUD)
         self._is_running = False
+        self._connection_status = "stopped"  # stopped, starting, connected, error
+        self._fusion_processing = False  # Track if fusion worker is actively processing
+        
+        # Timer for data activity timeout
+        self._data_activity_timer = QTimer()
+        self._data_activity_timer.timeout.connect(self._on_data_timeout)
+        self._data_activity_timer.setSingleShot(True)
+        self._last_data_time = 0
         
         super().__init__(parent, "Serial Reader", message_callback=message_callback)
         
     def setup_ui(self):
         """Setup the serial panel UI (mirrors tkinter layout exactly)."""
-        # Create main layout
-        layout = QGridLayout(self)
-        layout.setContentsMargins(self.padding, self.padding, self.padding, self.padding)
-        layout.setSpacing(6)
+        # Main layout with minimal padding
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(4, 1, 4, 1)  # Match calibration panel horizontal padding
+        main_layout.setSpacing(2)  # Minimal spacing
+        
+        # Serial controls frame (same pattern as network panel)
+        controls_frame = QFrame()
+        layout = QGridLayout(controls_frame)
+        layout.setContentsMargins(6, 0, 6, 0)  # Match calibration frame horizontal padding
+        layout.setSpacing(2)  # Minimal spacing
         
         # Serial Port selection (same as tkinter)
-        port_label = QLabel("Serial Port:")
+        port_label = QLabel("Port:")
         layout.addWidget(port_label, 0, 0)
         
         self.port_combo = QComboBox()
         ports = [f"COM{i}" for i in range(100)]  # Same as tkinter
         self.port_combo.addItems(ports)
         self.port_combo.setCurrentText(self._port_value)
-        self.port_combo.setMaximumWidth(80)
+        self.port_combo.setMaximumWidth(70)  # Reduced from 80
         self.port_combo.currentTextChanged.connect(self._on_port_changed)
         layout.addWidget(self.port_combo, 0, 1)
         
         # Baud Rate selection (same as tkinter)  
-        baud_label = QLabel("Baud Rate:")
+        baud_label = QLabel("Baud:")
         layout.addWidget(baud_label, 0, 2)
         
         self.baud_combo = QComboBox()
         baud_rates = ["9600", "19200", "38400", "57600", "115200", "230400", "250000"]
         self.baud_combo.addItems(baud_rates)
         self.baud_combo.setCurrentText(self._baud_value)
-        self.baud_combo.setMaximumWidth(80)
+        self.baud_combo.setMaximumWidth(90)  # Increased to accommodate all baud rates
         self.baud_combo.currentTextChanged.connect(self._on_baud_changed)
         layout.addWidget(self.baud_combo, 0, 3)
         
-        # Start/Stop button (same as tkinter)
-        self.toggle_button = QPushButton("Start")
-        self.toggle_button.setMaximumWidth(80)
-        self.toggle_button.clicked.connect(self.toggle)
-        layout.addWidget(self.toggle_button, 0, 4)
+        # Add stretch to push status and button to the right
+        layout.setColumnStretch(4, 1)
         
-        # Status label (same as tkinter)
+        # Status label (right-aligned before button)
         self.status_label = QLabel("Stopped")
-        self.status_label.setStyleSheet("color: blue;")
+        self.status_label.setProperty("status", "disabled")
         layout.addWidget(self.status_label, 0, 5)
         
-        # Set column stretch to match tkinter layout
-        layout.setColumnStretch(5, 1)  # Status label gets remaining space
+        # Start/Stop button (rightmost)
+        self.toggle_button = QPushButton("Start")
+        self.toggle_button.setMaximumWidth(60)  # Reduced from 80
+        self.toggle_button.clicked.connect(self.toggle)
+        layout.addWidget(self.toggle_button, 0, 6)
+        
+        main_layout.addWidget(controls_frame)
     
     def _on_port_changed(self, port):
         """Handle port selection change."""
@@ -122,11 +138,13 @@ class SerialPanelQt(BasePanelQt):
             self.log_message("Failed to request serial start")
             return
         
-        # Update UI state (same as tkinter)
+        # Update UI state - show starting status
         self._is_running = True
+        self._connection_status = "starting"
         self.toggle_button.setText("Stop")
-        self.status_label.setText(f"Running on {port} @ {baud}")
-        self.status_label.setStyleSheet("color: green;")
+        self.status_label.setText(f"Starting {port} @ {baud}...")
+        self.status_label.setProperty("status", "warning")
+        self.status_label.style().polish(self.status_label)
         self.log_message(f"Start requested on {port} @ {baud}")
     
     def _stop_serial(self):
@@ -142,9 +160,12 @@ class SerialPanelQt(BasePanelQt):
         
         # Update UI state (same as tkinter)
         self._is_running = False
+        self._connection_status = "stopped"
         self.toggle_button.setText("Start")
         self.status_label.setText("Stopped")
-        self.status_label.setStyleSheet("color: blue;")
+        self.status_label.setProperty("status", "disabled")
+        self.status_label.style().polish(self.status_label)
+        self._data_activity_timer.stop()
         self.log_message("Stop requested")
         
         # Perform optional global stop actions (identical to tkinter)
@@ -191,3 +212,69 @@ class SerialPanelQt(BasePanelQt):
             baud = prefs['baud_rate']
             self.baud_combo.setCurrentText(str(baud))
             self._baud_value = str(baud)
+    
+    def update_connection_status(self, status: str):
+        """Update connection status from serial worker."""
+        if not self._is_running:
+            return
+            
+        self._connection_status = status
+        port = self.port_combo.currentText()
+        baud = self.baud_combo.currentText()
+        
+        if status == "connected":
+            self.status_label.setText(f"Waiting for data...")
+            self.status_label.setProperty("status", "warning")  # Orange until fusion is active
+            self.status_label.style().polish(self.status_label)
+        elif status == "error":
+            self.status_label.setText(f"Error on {port} @ {baud}")
+            self.status_label.setProperty("status", "error")
+            self.status_label.style().polish(self.status_label)
+            self._data_activity_timer.stop()
+    
+    def update_data_activity(self):
+        """Called when data is received - indicates active connection."""
+        if not self._is_running or self._connection_status != "connected":
+            return
+            
+        import time
+        self._last_data_time = time.time()
+        
+        # Only show green when both connected AND fusion is processing
+        if self._fusion_processing:
+            port = self.port_combo.currentText()
+            baud = self.baud_combo.currentText()
+            self.status_label.setText(f"Running on {port} @ {baud}")
+            self.status_label.setProperty("status", "enabled")
+            self.status_label.style().polish(self.status_label)
+        
+        # Reset timeout timer (5 seconds without data = back to waiting)
+        self._data_activity_timer.start(5000)
+    
+    def _on_data_timeout(self):
+        """Called when no data received for timeout period."""
+        if not self._is_running or self._connection_status != "connected":
+            return
+            
+        # Back to waiting when no recent data
+        self.status_label.setText(f"Waiting for data...")
+        self.status_label.setProperty("status", "warning")
+        self.status_label.style().polish(self.status_label)
+    
+    def update_fusion_status(self, is_active):
+        """Update fusion processing status from statusQueue."""
+        self._fusion_processing = is_active
+        
+        # Update display immediately when fusion status changes
+        if self._is_running and self._connection_status == "connected":
+            if is_active:
+                # Fusion is now processing - show "Running" status
+                port = self.port_combo.currentText()
+                baud = self.baud_combo.currentText()
+                self.status_label.setText(f"Running on {port} @ {baud}")
+                self.status_label.setProperty("status", "enabled")
+            else:
+                # Fusion stopped processing
+                self.status_label.setText(f"Waiting for data...")
+                self.status_label.setProperty("status", "warning")
+            self.status_label.style().polish(self.status_label)

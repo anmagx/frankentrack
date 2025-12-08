@@ -51,16 +51,16 @@ class NetworkPanelQt(BasePanelQt):
     
     def setup_ui(self):
         """Build the network panel UI (mirrors tkinter layout exactly)."""
-        # Main layout
+        # Main layout with minimal padding
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(self.padding, self.padding, self.padding, self.padding)
-        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(4, 1, 4, 1)  # Match calibration panel horizontal padding
+        main_layout.setSpacing(2)  # Minimal spacing
         
         # Network controls frame (same as tkinter net_frm)
         controls_frame = QFrame()
         controls_layout = QHBoxLayout(controls_frame)
-        controls_layout.setContentsMargins(6, 0, 0, 0)
-        controls_layout.setSpacing(8)
+        controls_layout.setContentsMargins(6, 0, 6, 0)  # Match calibration frame horizontal padding
+        controls_layout.setSpacing(4)  # Slightly reduced spacing
         
         # IP Address entry (same as tkinter)
         ip_label = QLabel("IP:")
@@ -68,7 +68,7 @@ class NetworkPanelQt(BasePanelQt):
         
         self.udp_ip_entry = QLineEdit()
         self.udp_ip_entry.setText(self._udp_ip)
-        self.udp_ip_entry.setMaximumWidth(110)  # Similar to tkinter width=14
+        self.udp_ip_entry.setMaximumWidth(100)  # Reduced from 110
         self.udp_ip_entry.textChanged.connect(self._on_ip_changed)
         controls_layout.addWidget(self.udp_ip_entry)
         
@@ -78,35 +78,27 @@ class NetworkPanelQt(BasePanelQt):
         
         self.udp_port_entry = QLineEdit()
         self.udp_port_entry.setText(self._udp_port)
-        self.udp_port_entry.setMaximumWidth(60)  # Similar to tkinter width=7
+        self.udp_port_entry.setMaximumWidth(55)  # Reduced from 60
         self.udp_port_entry.setValidator(QIntValidator(1, 65535))  # Valid port range
         self.udp_port_entry.textChanged.connect(self._on_port_changed)
         controls_layout.addWidget(self.udp_port_entry)
         
-        # Start/Stop UDP button (same as tkinter)
+        # Add stretch to push status and button to the right
+        controls_layout.addStretch()
+        
+        # Status indicator (right-aligned before button)
+        self.udp_status_label = QLabel(self._udp_status_text)
+        self.udp_status_label.setObjectName("statusLabel")
+        self.udp_status_label.setProperty("status", "disabled")
+        controls_layout.addWidget(self.udp_status_label)
+        
+        # Start/Stop UDP button (rightmost)
         self.udp_toggle_btn = QPushButton(self._udp_btn_text)
+        self.udp_toggle_btn.setMaximumWidth(80)
         self.udp_toggle_btn.clicked.connect(self.toggle_udp)
         controls_layout.addWidget(self.udp_toggle_btn)
         
-        # Add stretch to push everything left
-        controls_layout.addStretch()
-        
         main_layout.addWidget(controls_frame)
-        
-        # Status indicator frame (same as tkinter status_frm)
-        status_frame = QFrame()
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(6, 6, 6, 0)
-        
-        self.udp_status_label = QLabel(self._udp_status_text)
-        self.udp_status_label.setStyleSheet("color: blue;")
-        status_layout.addWidget(self.udp_status_label)
-        status_layout.addStretch()
-        
-        main_layout.addWidget(status_frame)
-        
-        # Add stretch to push everything to top
-        main_layout.addStretch()
     
     def _on_ip_changed(self, text):
         """Handle IP address entry change."""
@@ -160,7 +152,8 @@ class NetworkPanelQt(BasePanelQt):
         # Update status (same as tkinter)
         self._udp_status_text = f"UDP Enabled -> {ip}:{port}"
         self.udp_status_label.setText(self._udp_status_text)
-        self.udp_status_label.setStyleSheet("color: green;")
+        self.udp_status_label.setProperty("status", "enabled")
+        self.udp_status_label.style().polish(self.udp_status_label)  # Force style refresh
         
         self.log_message(f"UDP enabled -> {ip}:{port}")
     
@@ -182,7 +175,8 @@ class NetworkPanelQt(BasePanelQt):
         # Update status (same as tkinter)
         self._udp_status_text = "UDP Disabled"
         self.udp_status_label.setText(self._udp_status_text)
-        self.udp_status_label.setStyleSheet("color: blue;")
+        self.udp_status_label.setProperty("status", "disabled")
+        self.udp_status_label.style().polish(self.udp_status_label)  # Force style refresh
         
         self.log_message("UDP disabled")
     

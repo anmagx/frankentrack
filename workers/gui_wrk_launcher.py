@@ -1,26 +1,19 @@
 """
 GUI Worker Launcher for frankentrack
 
-This module provides a unified interface for launching either the tkinter or PyQt5 GUI
-based on the GUI_BACKEND configuration setting. It maintains compatibility with the
-existing process manager while enabling the new tabbed PyQt5 interface.
-
-Supported backends:
-- 'tkinter': Original tkinter GUI with full panel layout
-- 'pyqt': New PyQt5 GUI with tabbed interface  
-- 'pyqt_tabbed': PyQt5 tabbed interface (same as 'pyqt')
+This module provides the PyQt5 GUI worker interface for frankentrack.
+The application has been fully migrated from tkinter to PyQt5.
 """
 
 import sys
-from config.config import GUI_BACKEND
 
 
 def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event, 
                eulerDisplayQueue, controlQueue, serialControlQueue, 
                translationDisplayQueue, cameraControlQueue, cameraPreviewQueue, 
-               udpControlQueue, logQueue):
+               udpControlQueue, logQueue, uiStatusQueue):
     """
-    Launch the appropriate GUI worker based on GUI_BACKEND configuration.
+    Launch the PyQt5 GUI worker.
     
     This function maintains the same interface as the original gui_wrk.run_worker
     to ensure compatibility with the existing process manager.
@@ -39,77 +32,38 @@ def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event,
         udpControlQueue: Queue for UDP worker commands  
         logQueue: Queue for log messages
     """
-    backend = GUI_BACKEND.lower()
+    print("[GUI Launcher] Starting PyQt5 GUI...")
     
-    print(f"[GUI Launcher] Starting GUI with backend: {backend}")
-    
-    if backend in ['pyqt', 'pyqt_tabbed']:
-        # Launch PyQt5 tabbed GUI
-        try:
-            from workers.gui_qt.gui_wrk_qt_tabbed import start_gui_worker
-            
-            def on_stop():
-                """Callback when GUI is closed."""
-                stop_event.set()
-            
-            start_gui_worker(
-                serial_control_queue=serialControlQueue,
-                fusion_control_queue=controlQueue,
-                camera_control_queue=cameraControlQueue,
-                udp_control_queue=udpControlQueue,
-                status_queue=statusQueue,
-                message_queue=messageQueue,
-                stop_event=stop_event,
-                on_stop_callback=on_stop
-            )
-            
-        except Exception as e:
-            print(f"[GUI Launcher] Error starting PyQt5 GUI: {e}")
-            print("[GUI Launcher] Falling back to tkinter GUI...")
-            _launch_tkinter_gui(
-                messageQueue, serialDisplayQueue, statusQueue, stop_event,
-                eulerDisplayQueue, controlQueue, serialControlQueue,
-                translationDisplayQueue, cameraControlQueue, cameraPreviewQueue,
-                udpControlQueue, logQueue
-            )
-            
-    elif backend == 'tkinter':
-        # Launch original tkinter GUI
-        _launch_tkinter_gui(
-            messageQueue, serialDisplayQueue, statusQueue, stop_event,
-            eulerDisplayQueue, controlQueue, serialControlQueue,
-            translationDisplayQueue, cameraControlQueue, cameraPreviewQueue,
-            udpControlQueue, logQueue
-        )
-        
-    else:
-        print(f"[GUI Launcher] Unknown GUI backend '{backend}', defaulting to tkinter")
-        _launch_tkinter_gui(
-            messageQueue, serialDisplayQueue, statusQueue, stop_event,
-            eulerDisplayQueue, controlQueue, serialControlQueue,
-            translationDisplayQueue, cameraControlQueue, cameraPreviewQueue,
-            udpControlQueue, logQueue
-        )
-
-
-def _launch_tkinter_gui(messageQueue, serialDisplayQueue, statusQueue, stop_event, 
-                        eulerDisplayQueue, controlQueue, serialControlQueue, 
-                        translationDisplayQueue, cameraControlQueue, cameraPreviewQueue, 
-                        udpControlQueue, logQueue):
-    """Launch the original tkinter GUI worker."""
     try:
-        from workers.gui_wrk import run_worker as run_tkinter_worker
+        from workers.gui_qt.gui_wrk_qt_tabbed import start_gui_worker
         
-        run_tkinter_worker(
-            messageQueue, serialDisplayQueue, statusQueue, stop_event,
-            eulerDisplayQueue, controlQueue, serialControlQueue,
-            translationDisplayQueue, cameraControlQueue, cameraPreviewQueue,
-            udpControlQueue, logQueue
+        def on_stop():
+            """Callback when GUI is closed."""
+            stop_event.set()
+        
+        start_gui_worker(
+            serial_control_queue=serialControlQueue,
+            fusion_control_queue=controlQueue,
+            camera_control_queue=cameraControlQueue,
+            udp_control_queue=udpControlQueue,
+            status_queue=statusQueue,
+            ui_status_queue=uiStatusQueue,
+            message_queue=messageQueue,
+            serial_display_queue=serialDisplayQueue,
+            euler_display_queue=eulerDisplayQueue,
+            translation_display_queue=translationDisplayQueue,
+            camera_preview_queue=cameraPreviewQueue,
+            log_queue=logQueue,
+            stop_event=stop_event,
+            on_stop_callback=on_stop
         )
         
     except Exception as e:
-        print(f"[GUI Launcher] Error starting tkinter GUI: {e}")
-        sys.exit(1)
+        print(f"[GUI Launcher] Error starting PyQt5 GUI: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
 
 
 if __name__ == "__main__":
@@ -124,7 +78,7 @@ if __name__ == "__main__":
     queue_names = [
         'messageQueue', 'serialDisplayQueue', 'statusQueue', 'eulerDisplayQueue',
         'controlQueue', 'serialControlQueue', 'translationDisplayQueue',
-        'cameraControlQueue', 'cameraPreviewQueue', 'udpControlQueue', 'logQueue'
+        'cameraControlQueue', 'cameraPreviewQueue', 'udpControlQueue', 'logQueue', 'uiStatusQueue'
     ]
     
     for name in queue_names:
@@ -145,5 +99,6 @@ if __name__ == "__main__":
         cameraControlQueue=mock_queues['cameraControlQueue'],
         cameraPreviewQueue=mock_queues['cameraPreviewQueue'],
         udpControlQueue=mock_queues['udpControlQueue'],
-        logQueue=mock_queues['logQueue']
+        logQueue=mock_queues['logQueue'],
+        uiStatusQueue=mock_queues['uiStatusQueue']
     )

@@ -1,0 +1,229 @@
+/* 
+Dark Theme for frankentrack GUI
+Modern dark appearance with good contrast
+*/
+
+/* Main application styling */
+QMainWindow {
+    background-color: #2b2b2b;
+    color: #ffffff;
+}
+
+/* Group boxes and panels */
+QGroupBox {
+    font-weight: bold;
+    border: 2px solid #555555;
+    border-radius: 5px;
+    margin-top: 1ex;
+    padding-top: 6px;
+    background-color: #3c3c3c;
+    color: #ffffff;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px 0 5px;
+    color: #cccccc;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #555555;
+    border: 1px solid #777777;
+    border-radius: 3px;
+    padding: 5px 10px;
+    color: #ffffff;
+}
+
+QPushButton:hover {
+    background-color: #666666;
+}
+
+QPushButton:pressed {
+    background-color: #444444;
+}
+
+/* Labels */
+QLabel {
+    color: #ffffff;
+    background-color: transparent;
+}
+
+/* Sliders */
+QSlider::groove:horizontal {
+    border: 1px solid #666666;
+    height: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b2b2b, stop:1 #3c3c3c);
+    margin: 2px 0;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #666666, stop:1 #888888);
+    border: 1px solid #aaaaaa;
+    width: 18px;
+    margin: -2px 0;
+    border-radius: 3px;
+}
+
+/* Combo boxes */
+QComboBox {
+    border: 1px solid #666666;
+    border-radius: 3px;
+    padding: 1px 18px 1px 3px;
+    background-color: #3c3c3c;
+    color: #ffffff;
+}
+
+QComboBox:hover {
+    background-color: #4a4a4a;
+}
+
+QComboBox QAbstractItemView {
+    border: 1px solid #666666;
+    background-color: #3c3c3c;
+    color: #ffffff;
+    selection-background-color: #555555;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left-width: 1px;
+    border-left-color: #777777;
+    border-left-style: solid;
+    border-top-width: 0px;
+    border-bottom-width: 0px;
+    border-right-width: 0px;
+}
+
+/* Line edits (text inputs) */
+QLineEdit {
+    border: 1px solid #666666;
+    border-radius: 3px;
+    padding: 2px 4px;
+    background-color: #3c3c3c;
+    color: #ffffff;
+    selection-background-color: #555555;
+}
+
+QLineEdit:focus {
+    border: 2px solid #0078d4;
+    background-color: #4a4a4a;
+}
+
+QLineEdit:hover {
+    background-color: #4a4a4a;
+}
+
+/* Status bar */
+QStatusBar {
+    background-color: #2b2b2b;
+    border: 1px solid #555555;
+    color: #ffffff;
+}
+
+/* Tab widget */
+QTabWidget::pane {
+    border: 1px solid #555555;
+    background-color: #3c3c3c;
+}
+
+QTabBar::tab {
+    background-color: #555555;
+    border: 1px solid #777777;
+    padding: 8px 16px;
+    margin-right: 2px;
+    color: #ffffff;
+}
+
+QTabBar::tab:selected {
+    background-color: #3c3c3c;
+    border-bottom-color: #3c3c3c;
+}
+
+QTabBar::tab:hover {
+    background-color: #666666;
+}
+
+/* Frames */
+QFrame {
+    color: #ffffff;
+    background-color: transparent;
+}
+
+/* Text areas (for message panel) */
+QTextEdit, QPlainTextEdit {
+    background-color: #2b2b2b;
+    color: #ffffff;
+    border: 1px solid #555555;
+    border-radius: 3px;
+}
+
+/* Scroll bars */
+QScrollBar:vertical {
+    background-color: #3c3c3c;
+    width: 15px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #666666;
+    min-height: 20px;
+    border-radius: 7px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #777777;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background-color: #3c3c3c;
+    height: 15px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #666666;
+    min-width: 20px;
+    border-radius: 7px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #777777;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+/* Semantic status colors */
+QLabel[status="disabled"] {
+    color: #888888;
+}
+
+QLabel[status="enabled"] {
+    color: #28a745;
+}
+
+QLabel[status="error"] {
+    color: #dc3545;
+}
+
+QLabel[status="warning"] {
+    color: #ffc107;
+}
+
+QLabel[status="info"] {
+    color: #17a2b8;
+}

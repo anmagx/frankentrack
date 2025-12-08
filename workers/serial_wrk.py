@@ -13,7 +13,7 @@ from config.config import (
 )
 from util.error_utils import safe_queue_put, safe_queue_get
 
-def open_serial(port, baud, retry_delay, messageQueue, stop_event=None, serialControlQueue=None):
+def open_serial(port, baud, retry_delay, messageQueue, stop_event=None, serialControlQueue=None, statusQueue=None, uiStatusQueue=None):
     """Try to open serial port repeatedly until successful.
 
     This version listens to `serialControlQueue` and `stop_event` so a GUI stop
@@ -50,11 +50,21 @@ def open_serial(port, baud, retry_delay, messageQueue, stop_event=None, serialCo
             ser = serial.Serial(port, baud, timeout=SERIAL_TIMEOUT)
             safe_queue_put(messageQueue, f"Connected to {port} at {baud} baud.", 
                          timeout=QUEUE_PUT_TIMEOUT)
+            # Notify GUI of successful connection
+            if statusQueue:
+                safe_queue_put(statusQueue, ('serial_connection', 'connected'), timeout=QUEUE_PUT_TIMEOUT)
+            if uiStatusQueue:
+                safe_queue_put(uiStatusQueue, ('serial_connection', 'connected'), timeout=QUEUE_PUT_TIMEOUT)
             return ser
-        except SerialException:
+        except SerialException as e:
+            # Notify GUI of connection error on each retry
+            if statusQueue:
+                safe_queue_put(statusQueue, ('serial_connection', 'error'), timeout=QUEUE_PUT_TIMEOUT)
+            if uiStatusQueue:
+                safe_queue_put(uiStatusQueue, ('serial_connection', 'error'), timeout=QUEUE_PUT_TIMEOUT)
             time.sleep(retry_delay)
 
-def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, stop_event=None, serialControlQueue=None, statusQueue=None, logQueue=None):
+def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, stop_event=None, serialControlQueue=None, statusQueue=None, logQueue=None, uiStatusQueue=None):
     """Main serial thread controlled by commands from `serialControlQueue`.
 
     Commands expected on serialControlQueue:
@@ -90,7 +100,7 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
                         baud = DEFAULT_SERIAL_BAUD
                     log_info(logQueue, "Serial Worker", f"Attempting connection to {port} at {baud} baud")
                     # attempt to open (blocking retry loop, but cancellable)
-                    ser = open_serial(port, baud, SERIAL_RETRY_DELAY, messageQueue, stop_event, serialControlQueue)
+                    ser = open_serial(port, baud, SERIAL_RETRY_DELAY, messageQueue, stop_event, serialControlQueue, statusQueue, uiStatusQueue)
                     if ser is not None:
                         log_info(logQueue, "Serial Worker", f"Connected to {port}")
                     # reset counters on start
@@ -106,6 +116,11 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
                         ser = None
                         safe_queue_put(messageQueue, f"\nSerial on {port} stopped.", 
                                      timeout=QUEUE_PUT_TIMEOUT)
+                        # Notify GUI of serial stop/disconnection
+                        if statusQueue:
+                            safe_queue_put(statusQueue, ('serial_connection', 'stopped'), timeout=QUEUE_PUT_TIMEOUT)
+                        if uiStatusQueue:
+                            safe_queue_put(uiStatusQueue, ('serial_connection', 'stopped'), timeout=QUEUE_PUT_TIMEOUT)
 
         if ser is None:
             # nothing to read right now
@@ -122,6 +137,11 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
                     # forward serial payload
                     safe_queue_put(serialQueue, data, timeout=QUEUE_PUT_TIMEOUT)
                     safe_queue_put(serialDisplayQueue, data, timeout=QUEUE_PUT_TIMEOUT)
+                    # notify GUI of data activity
+                    if statusQueue:
+                        safe_queue_put(statusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
+                    if uiStatusQueue:
+                        safe_queue_put(uiStatusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
                     # count for MPS
                     mps_count += 1
                     now = time.time()
@@ -147,6 +167,11 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
             port_name = ser.port if hasattr(ser, 'port') else 'unknown'
             safe_queue_put(messageQueue, f"\nConnection lost. Reconnecting to {port_name}...", 
                          timeout=QUEUE_PUT_TIMEOUT)
+            # Notify GUI of connection error
+            if statusQueue:
+                safe_queue_put(statusQueue, ('serial_connection', 'error'), timeout=QUEUE_PUT_TIMEOUT)
+            if uiStatusQueue:
+                safe_queue_put(uiStatusQueue, ('serial_connection', 'error'), timeout=QUEUE_PUT_TIMEOUT)
             try:
                 ser.close()
             except Exception:
@@ -156,10 +181,10 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
     
     log_info(logQueue, "Serial Worker", "Serial thread stopped")
 
-def run_worker(messageQueue, serialQueue, serialDisplayQueue, stop_event=None, serialControlQueue=None, statusQueue=None, logQueue=None):
+def run_worker(messageQueue, serialQueue, serialDisplayQueue, stop_event=None, serialControlQueue=None, statusQueue=None, logQueue=None, uiStatusQueue=None):
     from util.log_utils import log_info
     try:
-        serial_thread(messageQueue, serialQueue, serialDisplayQueue, stop_event, serialControlQueue, statusQueue, logQueue)
+        serial_thread(messageQueue, serialQueue, serialDisplayQueue, stop_event, serialControlQueue, statusQueue, logQueue, uiStatusQueue)
     except KeyboardInterrupt:
         log_info(logQueue, "Serial Worker", "Serial worker interrupted during shutdown")
     finally:

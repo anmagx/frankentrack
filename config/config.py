@@ -11,19 +11,18 @@ Do NOT store runtime state here - this module only defines initial defaults.
 # Application Information
 # ============================================================================
 APP_NAME = "frankentrack"
-APP_VERSION = "1.0.0"
+APP_VERSION = "0.13-alpha"
 
 # ============================================================================
 # GUI Timing and Updates  
 # ============================================================================
-GUI_UPDATE_INTERVAL_MS = 100         # How often GUI updates displays (milliseconds)
-WORKER_QUEUE_CHECK_INTERVAL_MS = 50  # How often GUI checks queues (milliseconds)
+GUI_UPDATE_INTERVAL_MS = 16          # How often GUI updates displays (milliseconds) - ~60 FPS for real-time
+WORKER_QUEUE_CHECK_INTERVAL_MS = 10  # How often GUI checks queues (milliseconds) - faster for real-time
 
 # ============================================================================
-# GUI Backend
+# GUI Backend (PyQt5 only)
 # ============================================================================
-DEFAULT_GUI_BACKEND = 'pyqt'  # Options: 'tkinter', 'pyqt' 
-GUI_BACKEND = DEFAULT_GUI_BACKEND
+# Application uses PyQt5 for all GUI functionality
 
 # ============================================================================
 # Serial Communication
@@ -37,14 +36,14 @@ SERIAL_TIMEOUT = 1.0  # seconds
 # Queue Configuration
 # ============================================================================
 QUEUE_SIZE_DATA = 100  # For data pipelines (serial, euler, translation)
-QUEUE_SIZE_DISPLAY = 30  # For display-only queues
+QUEUE_SIZE_DISPLAY = 100  # For display-only queues - increased for real-time performance
 QUEUE_SIZE_CONTROL = 10  # For control command queues
 QUEUE_SIZE_PREVIEW = 6  # For camera preview (small buffer to reduce dropped frames)
 
 # ============================================================================
 # Timeout Values
 # ============================================================================
-QUEUE_PUT_TIMEOUT = 0.1  # seconds
+QUEUE_PUT_TIMEOUT = 0.001  # seconds - very fast timeout for real-time performance
 QUEUE_GET_TIMEOUT = 0.5  # seconds
 WORKER_JOIN_TIMEOUT = 2.0  # seconds to wait for worker shutdown
 STALE_DETECTION_TIMEOUT = 2.0  # seconds before considering detection stale
@@ -54,9 +53,9 @@ STALE_DETECTION_TIMEOUT = 2.0  # seconds before considering detection stale
 # ============================================================================
 ACCEL_THRESHOLD = 0.15  # g-units: threshold for stationary detection
 DEFAULT_CENTER_THRESHOLD = 5.0  # degrees: threshold for "near center" detection
-ALPHA_YAW = 0.98   # Complementary filter alpha for yaw
-ALPHA_ROLL = 0.98  # Complementary filter alpha for roll
-ALPHA_PITCH = 0.98 # Complementary filter alpha for pitch
+ALPHA_YAW = 0.98   # Complementary filter alpha for yaw (higher = more gyro dominance)
+ALPHA_ROLL = 0.98  # Complementary filter alpha for roll (higher = smoother accel correction)
+ALPHA_PITCH = 0.98 # Complementary filter alpha for pitch (higher = smoother accel correction)
 ALPHA_DRIFT_CORRECTION = 0.99  # Alpha for drift correction when stationary
 
 # Time delta validation
@@ -120,6 +119,14 @@ GUI_POLL_INTERVAL_MS = 100  # milliseconds
 MAX_TEXT_BUFFER_LINES = 500  # lines to keep in message/serial displays
 FPS_REPORT_INTERVAL = 1.0  # seconds between FPS updates
 THRESH_DEBOUNCE_MS = 150  # milliseconds to debounce threshold slider
+
+# Orientation visualization
+VISUALIZATION_RANGE = 15.0  # degrees: +/- range for pitch/yaw axes
+VISUALIZATION_SIZE = 160  # pixels: width and height of visualization widget
+
+# Theme settings
+DEFAULT_THEME = 'light'  # 'light', 'dark'
+THEMES_ENABLED = True
 
 # ============================================================================
 # Logging

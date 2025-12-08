@@ -72,9 +72,19 @@ def run_worker(eulerQueue, translationQueue, stop_event, udp_ip=None, udp_port=N
                         # ignore other commands
                 except Exception:
                     pass
-            sendData = safe_queue_get(eulerQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
+            # Get Euler data - drain queue to get most recent
+            sendData = None
+            data_count = 0
+            while data_count < 10:  # Limit to prevent infinite loop
+                latest = safe_queue_get(eulerQueue, timeout=0.0, default=None)
+                if latest is None:
+                    break
+                sendData = latest
+                data_count += 1
+            
             if sendData is None:
-                # no data available, loop and check stop_event
+                # no data available, small delay and check stop_event
+                time.sleep(0.001)
                 continue
 
             try:
@@ -135,8 +145,7 @@ def run_worker(eulerQueue, translationQueue, stop_event, udp_ip=None, udp_port=N
                 except Exception:
                     # ensure UDP sending is not impacted by reporting errors
                     pass
-                # tiny throttle to avoid busy-looping if messages pile up
-                time.sleep(0)
+                # Remove sleep to allow maximum throughput
             except Exception as e:
                 log_error(logQueue, "UDP Worker", f"Pack/send error: {e}")
                 print(f"[UDP Worker] pack/send error: {e}")

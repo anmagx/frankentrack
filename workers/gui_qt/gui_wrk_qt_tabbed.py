@@ -12,6 +12,7 @@ import sys
 import queue
 import threading
 import time
+import os
 from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
@@ -27,9 +28,13 @@ from workers.gui_qt.panels.message_panel import MessagePanelQt
 from workers.gui_qt.panels.orientation_panel import OrientationPanelQt
 from workers.gui_qt.panels.calibration_panel import CalibrationPanelQt
 from workers.gui_qt.panels.camera_panel import CameraPanelQt
+from workers.gui_qt.panels.status_bar import StatusBarQt
+from workers.gui_qt.panels.preferences_panel import PreferencesPanel
+from workers.gui_qt.panels.about_panel import AboutPanel
 
-from workers.gui.managers.preferences_manager import PreferencesManager
-from workers.gui.managers.icon_helper import set_window_icon
+from workers.gui_qt.managers.preferences_manager import PreferencesManager
+from workers.gui_qt.managers.icon_helper import set_window_icon
+from workers.gui_qt.theme_manager import ThemeManager
 
 from config.config import (
     GUI_UPDATE_INTERVAL_MS, WORKER_QUEUE_CHECK_INTERVAL_MS,
@@ -49,15 +54,11 @@ class TabbedGUISignals(QObject):
 class TabbedGUIWorker(QMainWindow):
     """PyQt5 GUI worker with tabbed layout for frankentrack."""
 
-    def __init__(self, 
-                 serial_control_queue,
-                 fusion_control_queue, 
-                 camera_control_queue,
-                 udp_control_queue,
-                 status_queue,
-                 message_queue,
-                 stop_event,
-                 on_stop_callback=None):
+    def __init__(self, serial_control_queue, fusion_control_queue, camera_control_queue,
+                 udp_control_queue, status_queue, ui_status_queue, message_queue,
+                 serial_display_queue=None, euler_display_queue=None,
+                 translation_display_queue=None, camera_preview_queue=None,
+                 log_queue=None, stop_event=None, on_stop_callback=None):
         """
         Initialize the tabbed GUI worker.
         
@@ -67,7 +68,13 @@ class TabbedGUIWorker(QMainWindow):
             camera_control_queue: Queue for camera worker commands
             udp_control_queue: Queue for UDP worker commands
             status_queue: Queue for receiving status updates
+            ui_status_queue: Queue for receiving UI-specific status updates
             message_queue: Queue for receiving messages
+            serial_display_queue: Queue for raw serial data display
+            euler_display_queue: Queue for orientation angles
+            translation_display_queue: Queue for position data
+            camera_preview_queue: Queue for camera preview frames
+            log_queue: Queue for log messages
             stop_event: Threading event for shutdown coordination
             on_stop_callback: Callback when GUI is closed
         """
@@ -79,12 +86,19 @@ class TabbedGUIWorker(QMainWindow):
         self.camera_control_queue = camera_control_queue
         self.udp_control_queue = udp_control_queue
         self.status_queue = status_queue
+        self.ui_status_queue = ui_status_queue
         self.message_queue = message_queue
+        self.serial_display_queue = serial_display_queue
+        self.euler_display_queue = euler_display_queue
+        self.translation_display_queue = translation_display_queue
+        self.camera_preview_queue = camera_preview_queue
+        self.log_queue = log_queue
         self.stop_event = stop_event
         self.on_stop_callback = on_stop_callback
         
-        # GUI state
-        self.message_panel_collapsed = False
+        # Initialize managers
+        self.preferences_manager = PreferencesManager()
+        self.theme_manager = ThemeManager(QApplication.instance())
         
         # Initialize signals
         self.signals = TabbedGUISignals()
@@ -93,14 +107,17 @@ class TabbedGUIWorker(QMainWindow):
         # Setup UI
         self.setup_ui()
         self.setup_timers()
+        
+        # Auto-resize window to fit content perfectly (after UI is built)
+        QTimer.singleShot(0, self._finalize_window_size)
+        
         self.load_preferences()
         
         print("[TabbedGUI] PyQt5 tabbed GUI worker initialized")
     
     def setup_ui(self):
         """Setup the main UI with tabbed layout."""
-        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - PyQt5")
-        self.setGeometry(100, 100, 900, 700)
+        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         
         # Set window icon
         try:
@@ -123,11 +140,13 @@ class TabbedGUIWorker(QMainWindow):
         # Create tabs
         self.create_orientation_tab()
         self.create_position_tab()
+        self.create_messages_tab()
+        self.create_preferences_tab()
+        self.create_about_tab()
         
         # Status bar at bottom
-        self.status_bar = QStatusBar()
-        self.status_bar.showMessage("frankentrack ready")
-        self.setStatusBar(self.status_bar)
+        self.status_bar = StatusBarQt(self)
+        main_layout.addWidget(self.status_bar)
     
     def create_orientation_tab(self):
         """Create the Orientation Tracking tab."""
@@ -142,41 +161,9 @@ class TabbedGUIWorker(QMainWindow):
             self.serial_control_queue,
             self._log_message,
             padding=6,
-            on_stop=self._on_serial_stop
+            on_stop=None  # Don't link serial stop to app shutdown
         )
         layout.addWidget(self.serial_panel)
-        
-        # Message Panel with collapse/expand functionality
-        message_frame = QFrame()
-        message_layout = QVBoxLayout(message_frame)
-        message_layout.setContentsMargins(0, 0, 0, 0)
-        message_layout.setSpacing(2)
-        
-        # Message panel header with collapse button
-        header_frame = QFrame()
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(4, 2, 4, 2)
-        
-        self.message_toggle_btn = QPushButton("📜 Messages (Click to collapse)")
-        self.message_toggle_btn.setStyleSheet("text-align: left; padding: 4px;")
-        self.message_toggle_btn.clicked.connect(self.toggle_message_panel)
-        header_layout.addWidget(self.message_toggle_btn)
-        
-        header_layout.addStretch()
-        message_layout.addWidget(header_frame)
-        
-        # Message Panel
-        self.message_panel = MessagePanelQt(
-            message_frame,
-            serial_height=6,
-            message_height=6,
-            max_serial_lines=150,
-            max_message_lines=75,
-            padding=4
-        )
-        message_layout.addWidget(self.message_panel)
-        
-        layout.addWidget(message_frame)
         
         # Calibration Panel (compact)
         self.calibration_panel = CalibrationPanelQt(
@@ -196,6 +183,9 @@ class TabbedGUIWorker(QMainWindow):
         )
         layout.addWidget(self.orientation_panel)
         
+        # Connect calibration panel to orientation panel for drift angle visualization
+        self.orientation_panel.connect_calibration_panel(self.calibration_panel)
+        
         # Network Panel (compact)
         self.network_panel = NetworkPanelQt(
             orientation_widget,
@@ -204,9 +194,6 @@ class TabbedGUIWorker(QMainWindow):
             padding=6
         )
         layout.addWidget(self.network_panel)
-        
-        # Add stretch to push everything to top
-        layout.addStretch()
         
         # Add tab
         self.tab_widget.addTab(orientation_widget, "🧭 Orientation Tracking")
@@ -231,19 +218,66 @@ class TabbedGUIWorker(QMainWindow):
         
         # Add tab
         self.tab_widget.addTab(position_widget, "📹 Position Tracking")
+
+    def create_messages_tab(self):
+        """Create the Messages tab with serial monitor and application logs."""
+        messages_widget = QWidget()
+        layout = QVBoxLayout(messages_widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Message Panel (full-sized in its own tab)
+        self.message_panel = MessagePanelQt(
+            messages_widget,
+            serial_height=12,  # Larger in dedicated tab
+            message_height=12,  # Larger in dedicated tab
+            max_serial_lines=500,  # More history in dedicated tab
+            max_message_lines=200,  # More history in dedicated tab
+            padding=6
+        )
+        layout.addWidget(self.message_panel)
+        
+        # Add tab
+        self.tab_widget.addTab(messages_widget, "📜 Messages")
     
-    def toggle_message_panel(self):
-        """Toggle the message panel collapsed/expanded state."""
-        if self.message_panel_collapsed:
-            # Expand
-            self.message_panel.show()
-            self.message_toggle_btn.setText("📜 Messages (Click to collapse)")
-            self.message_panel_collapsed = False
-        else:
-            # Collapse
-            self.message_panel.hide()
-            self.message_toggle_btn.setText("📜 Messages (Click to expand)")
-            self.message_panel_collapsed = True
+    def create_preferences_tab(self):
+        """Create the Preferences tab."""
+        preferences_widget = QWidget()
+        layout = QVBoxLayout(preferences_widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Preferences Panel
+        self.preferences_panel = PreferencesPanel(
+            preferences_widget,
+            self.preferences_manager
+        )
+        
+        # Connect preferences panel to calibration panel for shortcuts
+        self.preferences_panel.connect_calibration_panel(self.calibration_panel)
+        
+        # Connect theme change signal
+        self.preferences_panel.theme_changed.connect(self._apply_theme)
+        self.preferences_panel.preferences_changed.connect(self.save_preferences)
+        
+        layout.addWidget(self.preferences_panel)
+        layout.addStretch()
+        
+        # Add tab
+        self.tab_widget.addTab(preferences_widget, "⚙️ Preferences")
+    
+    def _apply_theme(self, theme_name):
+        """Apply the selected theme to the application."""
+        try:
+            self.theme_manager.load_theme(theme_name)
+            print(f"[TabbedGUI] Applied theme: {theme_name}")
+        except Exception as e:
+            print(f"[TabbedGUI] Error applying theme {theme_name}: {e}")
+    
+    def create_about_tab(self):
+        """Create the About tab."""
+        about_panel = AboutPanel()
+        self.tab_widget.addTab(about_panel, "About")
     
     def _connect_signals(self):
         """Connect internal signals to update methods."""
@@ -267,92 +301,296 @@ class TabbedGUIWorker(QMainWindow):
     
     def process_queues(self):
         """Process incoming queue messages."""
-        # Process status updates
-        while not self.status_queue.empty():
-            try:
-                item = self.status_queue.get_nowait()
-                if isinstance(item, dict):
-                    if 'section' in item and 'message' in item:
-                        self.signals.status_update.emit(item['section'], item['message'])
-                    elif 'orientation' in item:
-                        # Orientation update from fusion worker
-                        euler = item['orientation']
-                        if len(euler) >= 3:
-                            self.signals.orientation_update.emit(euler[0], euler[1], euler[2])
-                    elif 'position' in item:
-                        # Position update from fusion worker
-                        pos = item['position']
-                        if len(pos) >= 3:
-                            self.signals.position_update.emit(pos[0], pos[1], pos[2])
-                    elif 'drift_status' in item:
-                        self.signals.drift_status_update.emit(item['drift_status'])
-                    elif 'preview_data' in item:
-                        # Camera preview data
-                        self.signals.preview_update.emit(item['preview_data'])
-                elif isinstance(item, str):
-                    # Simple string status
-                    self.signals.status_update.emit('general', item)
-            except queue.Empty:
-                break
-            except Exception as e:
-                print(f"[TabbedGUI] Error processing status queue: {e}")
+        try:
+            # Process euler display queue for real-time orientation updates
+            if self.euler_display_queue:
+                euler_count = 0
+                latest_euler = None
+                # Drain queue to get most recent data for real-time performance
+                while euler_count < 100 and not self.euler_display_queue.empty():
+                    try:
+                        euler_data = self.euler_display_queue.get_nowait()
+                        if isinstance(euler_data, (list, tuple)) and len(euler_data) >= 6:
+                            latest_euler = euler_data
+                        elif isinstance(euler_data, (list, tuple)) and len(euler_data) >= 3:
+                            latest_euler = euler_data
+                        euler_count += 1
+                    except:
+                        break
+                
+                # Update display with most recent data only
+                if latest_euler:
+                    if len(latest_euler) >= 6:
+                        # Data format from fusion worker: [yaw, pitch, roll, x, y, z]
+                        yaw, pitch, roll = latest_euler[0], latest_euler[1], latest_euler[2]
+                        x, y, z = latest_euler[3], latest_euler[4], latest_euler[5]
+                        
+                        # Update orientation display immediately for real-time response
+                        if hasattr(self.orientation_panel, 'update_euler'):
+                            self.orientation_panel.update_euler(yaw, pitch, roll)
+                        
+                        # Update position display immediately
+                        if hasattr(self.orientation_panel, 'update_position'):
+                            self.orientation_panel.update_position(x, y, z)
+                    elif len(latest_euler) >= 3:
+                        # Fallback for orientation-only data
+                        if hasattr(self.orientation_panel, 'update_euler'):
+                            self.orientation_panel.update_euler(*latest_euler[:3])
+            
+            # Process status updates (check if queue exists and not None)
+            if self.status_queue:
+                status_count = 0
+                while status_count < 20 and not self.status_queue.empty():
+                    try:
+                        item = self.status_queue.get_nowait()
+                        if isinstance(item, tuple) and len(item) >= 2:
+                            # Handle tuple format from fusion worker: ('status_type', value)
+                            status_type, value = item[0], item[1]
+                            self._handle_status_update(status_type, value)
+                        elif isinstance(item, dict):
+                            if 'section' in item and 'message' in item:
+                                self.signals.status_update.emit(item['section'], item['message'])
+                            elif 'orientation' in item:
+                                # Orientation update from fusion worker
+                                euler = item['orientation']
+                                if len(euler) >= 3:
+                                    # Data format: [yaw, pitch, roll] - emit in correct order
+                                    yaw, pitch, roll = euler[0], euler[1], euler[2]
+                                    self.signals.orientation_update.emit(roll, pitch, yaw)
+                            elif 'position' in item:
+                                # Position update from fusion worker
+                                pos = item['position']
+                                if len(pos) >= 3:
+                                    self.signals.position_update.emit(pos[0], pos[1], pos[2])
+                            elif 'drift_status' in item:
+                                self.signals.drift_status_update.emit(item['drift_status'])
+                            elif 'preview_data' in item:
+                                # Camera preview data
+                                self.signals.preview_update.emit(item['preview_data'])
+                        elif isinstance(item, str):
+                            # Simple string status
+                            self.signals.status_update.emit('general', item)
+                        status_count += 1
+                    except:
+                        break
+                        
+            # Process UI status updates (dedicated queue for UI state changes)
+            if self.ui_status_queue:
+                ui_status_count = 0
+                while ui_status_count < 20 and not self.ui_status_queue.empty():
+                    try:
+                        item = self.ui_status_queue.get_nowait()
+                        if isinstance(item, tuple) and len(item) >= 2:
+                            # Handle tuple format: ('status_type', value)
+                            status_type, value = item[0], item[1]
+                            self._handle_ui_status_update(status_type, value)
+                        ui_status_count += 1
+                    except:
+                        break
+        except Exception as e:
+            # Silently handle queue processing errors to avoid spam
+            pass
         
         # Process message queue
-        while not self.message_queue.empty():
-            try:
-                msg = self.message_queue.get_nowait()
-                if isinstance(msg, str):
-                    self.message_panel.append_message(msg)
-            except queue.Empty:
-                break
-            except Exception as e:
-                print(f"[TabbedGUI] Error processing message queue: {e}")
+        if self.message_queue:
+            msg_count = 0
+            while msg_count < 30 and not self.message_queue.empty():
+                try:
+                    msg = self.message_queue.get_nowait()
+                    if isinstance(msg, str) and hasattr(self.message_panel, 'append_message'):
+                        self.message_panel.append_message(msg)
+                    msg_count += 1
+                except:
+                    break
+            
+            # Update displays if we processed any messages
+            if msg_count > 0 and hasattr(self.message_panel, 'update_displays'):
+                self.message_panel.update_displays()
     
     def _update_status_bar(self, section: str, message: str):
         """Update the status bar with new information."""
         # For QStatusBar, we'll show the most recent message
         # You could extend this to show multiple sections if needed
-        self.status_bar.showMessage(f"{section}: {message}", 5000)  # Show for 5 seconds
+        print(f"[{section}] {message}")
     
     def _update_orientation(self, roll: float, pitch: float, yaw: float):
         """Update orientation display."""
-        if hasattr(self.orientation_panel, 'update_euler_angles'):
-            self.orientation_panel.update_euler_angles(roll, pitch, yaw)
+        if hasattr(self.orientation_panel, 'update_euler'):
+            self.orientation_panel.update_euler(yaw, pitch, roll)
     
     def _update_position(self, x: float, y: float, z: float):
         """Update position display."""
         if hasattr(self.orientation_panel, 'update_position'):
             self.orientation_panel.update_position(x, y, z)
     
-    def _update_drift_status(self, status: str):
+    def _update_drift_status(self, status):
         """Update drift status display."""
-        if hasattr(self.calibration_panel, 'update_calibration_status'):
-            # Map status to calibration panel format
-            if 'active' in status.lower() or 'drifting' in status.lower():
-                self.calibration_panel.update_calibration_status(False)  # Not calibrated
+        if hasattr(self.orientation_panel, 'update_drift_status'):
+            # Convert string to boolean for drift correction status
+            if isinstance(status, bool):
+                active = status
             else:
-                self.calibration_panel.update_calibration_status(True)   # Calibrated
+                # Handle string status from older code paths
+                active = 'active' in str(status).lower() or 'true' in str(status).lower()
+            self.orientation_panel.update_drift_status(active)
     
     def _update_preview(self, jpeg_data: bytes):
         """Update camera preview."""
         if hasattr(self.camera_panel, 'update_preview'):
             self.camera_panel.update_preview(jpeg_data)
     
+    def _handle_status_update(self, status_type: str, value):
+        """Handle specific status updates from workers."""
+        if status_type == 'processing':
+            # Update both serial panel and calibration panel with fusion processing status
+            is_active = (value == 'active')
+            if hasattr(self.serial_panel, 'update_fusion_status'):
+                self.serial_panel.update_fusion_status(is_active)
+            if hasattr(self.calibration_panel, 'update_processing_status'):
+                self.calibration_panel.update_processing_status(value)
+        elif status_type == 'serial_connection':
+            # Update serial panel with connection status
+            if hasattr(self.serial_panel, 'update_connection_status'):
+                self.serial_panel.update_connection_status(value)
+        elif status_type == 'serial_data':
+            # Update serial panel with data activity
+            if hasattr(self.serial_panel, 'update_data_activity') and value:
+                self.serial_panel.update_data_activity()
+        # Add other status types as needed
+    
+    def _handle_ui_status_update(self, status_type: str, value):
+        """Handle UI-specific status updates from workers."""
+        if status_type == 'processing':
+            # Update both serial panel and calibration panel with fusion processing status
+            is_active = (value == 'active')
+            if hasattr(self.serial_panel, 'update_fusion_status'):
+                self.serial_panel.update_fusion_status(is_active)
+            if hasattr(self.calibration_panel, 'update_processing_status'):
+                self.calibration_panel.update_processing_status(value)
+        elif status_type == 'serial_connection':
+            # Update serial panel with connection status
+            if hasattr(self.serial_panel, 'update_connection_status'):
+                self.serial_panel.update_connection_status(value)
+            
+            # When serial is disconnected/stopped, clear calibration state
+            if value in ['stopped', 'disconnected', 'error']:
+                if hasattr(self.calibration_panel, 'clear_calibration_state'):
+                    self.calibration_panel.clear_calibration_state()
+        elif status_type == 'serial_data':
+            # Update serial panel with data activity
+            if hasattr(self.serial_panel, 'update_data_activity') and value:
+                self.serial_panel.update_data_activity()
+        # Add other UI status types as needed
+    
     def update_gui_elements(self):
-        """Periodic GUI updates."""
-        # Update any time-based displays
-        pass
+        """Periodic GUI updates for display queues only (non-real-time data)."""
+        try:
+            # Process serial display queue for message panel
+            if self.serial_display_queue:
+                serial_count = 0
+                while serial_count < 30 and not self.serial_display_queue.empty():
+                    try:
+                        serial_data = self.serial_display_queue.get_nowait()
+                        if hasattr(self.message_panel, 'append_serial'):
+                            self.message_panel.append_serial(str(serial_data))
+                        serial_count += 1
+                    except:
+                        break
+                
+                # Update displays if we processed any serial data
+                if serial_count > 0 and hasattr(self.message_panel, 'update_displays'):
+                    self.message_panel.update_displays()
+            
+            # Note: Euler/orientation updates moved to process_queues() for real-time performance
+            
+            # Process translation display queue for position data
+            if self.translation_display_queue:
+                trans_count = 0
+                while trans_count < 10 and not self.translation_display_queue.empty():
+                    try:
+                        trans_data = self.translation_display_queue.get_nowait()
+                        if isinstance(trans_data, (list, tuple)) and len(trans_data) >= 3:
+                            if hasattr(self.orientation_panel, 'update_position'):
+                                self.orientation_panel.update_position(*trans_data[:3])
+                        trans_count += 1
+                    except:
+                        break
+            
+            # Process camera preview queue
+            if self.camera_preview_queue:
+                preview_count = 0
+                while preview_count < 3 and not self.camera_preview_queue.empty():
+                    try:
+                        preview_data = self.camera_preview_queue.get_nowait()
+                        if hasattr(self.camera_panel, 'update_preview'):
+                            self.camera_panel.update_preview(preview_data)
+                        preview_count += 1
+                    except:
+                        break
+                        
+        except Exception as e:
+            # Silently handle display queue errors to avoid spam
+            pass
+    
+    def _handle_status_update(self, status_type: str, value):
+        """Handle status updates from workers."""
+        try:
+            if status_type == 'gyro_calibrated' and hasattr(self.calibration_panel, 'update_calibration_status'):
+                self.calibration_panel.update_calibration_status(bool(value))
+            elif status_type == 'processing' and hasattr(self.calibration_panel, 'update_processing_status'):
+                self.calibration_panel.update_processing_status(str(value))
+            elif status_type == 'drift_correction' and hasattr(self.orientation_panel, 'update_drift_status'):
+                self.orientation_panel.update_drift_status(bool(value))
+            elif status_type == 'msg_rate' and hasattr(self.status_bar, 'update_message_rate'):
+                self.status_bar.update_message_rate(float(value))
+            elif status_type == 'send_rate' and hasattr(self.status_bar, 'update_send_rate'):
+                self.status_bar.update_send_rate(float(value))
+            elif status_type == 'cam_fps' and hasattr(self.status_bar, 'update_camera_fps'):
+                self.status_bar.update_camera_fps(float(value))
+            elif status_type == 'stationary' and hasattr(self.status_bar, 'update_device_status'):
+                self.status_bar.update_device_status(bool(value))
+            elif status_type == 'serial_connection' and hasattr(self.serial_panel, 'update_connection_status'):
+                self.serial_panel.update_connection_status(str(value))
+            elif status_type == 'serial_data' and hasattr(self.serial_panel, 'update_data_activity'):
+                self.serial_panel.update_data_activity()
+            elif status_type == 'filter_type':
+                # Filter type change acknowledgment from fusion worker
+                if hasattr(self.orientation_panel, 'filter_combo'):
+                    try:
+                        self.orientation_panel.filter_combo.setCurrentText(str(value))
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[TabbedGUI] Error handling status update {status_type}: {e}")
     
     def _log_message(self, message: str):
         """Log a message to the message panel."""
         if hasattr(self.message_panel, 'append_message'):
             self.message_panel.append_message(message)
+            # Update displays immediately for direct log calls
+            if hasattr(self.message_panel, 'update_displays'):
+                self.message_panel.update_displays()
     
-    def _on_serial_stop(self):
-        """Handle serial panel stop button."""
-        self._log_message("Serial panel stop requested")
-        if self.on_stop_callback:
-            self.on_stop_callback()
+    def _finalize_window_size(self):
+        """Finalize window size to fit all content after UI is fully loaded."""
+        # Force layout calculation multiple times for accuracy
+        self.adjustSize()
+        QTimer.singleShot(50, self.adjustSize)  # Second pass
+        
+        # Get the minimum size hint from the central widget
+        size_hint = self.centralWidget().minimumSizeHint()
+        if size_hint.isEmpty():
+            size_hint = self.centralWidget().sizeHint()
+        
+        # Minimal padding for window decorations only
+        min_width = size_hint.width() + 10  # Minimal decoration padding
+        min_height = size_hint.height() + 40  # Title bar + minimal padding
+        
+        # Resize to absolute minimum calculated size
+        self.resize(min_width, min_height)
+        
+        # Allow window to shrink slightly but prevent unusably small size
+        self.setMinimumSize(min_width - 50, min_height - 20)
     
     def load_preferences(self):
         """Load saved preferences for all panels."""
@@ -385,6 +623,19 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.camera_panel, 'set_prefs') and 'camera' in prefs:
                 self.camera_panel.set_prefs(prefs['camera'])
             
+            # Load shortcut preferences into preferences panel
+            if hasattr(self.preferences_panel, 'load_shortcut_preferences') and 'calibration' in prefs:
+                self.preferences_panel.load_shortcut_preferences(prefs['calibration'])
+            
+            # Load shortcut preferences into preferences panel
+            if hasattr(self.preferences_panel, 'load_shortcut_preferences') and 'calibration' in prefs:
+                self.preferences_panel.load_shortcut_preferences(prefs['calibration'])
+            
+            # Apply theme preference
+            if hasattr(self, 'preferences_manager'):
+                theme_name = self.preferences_manager.get_theme()
+                self._apply_theme(theme_name)
+            
             # Restore tab selection
             if 'gui' in prefs and isinstance(prefs['gui'], dict) and 'selected_tab' in prefs['gui']:
                 try:
@@ -394,19 +645,41 @@ class TabbedGUIWorker(QMainWindow):
                 except (ValueError, TypeError):
                     pass
             
-            # Restore message panel state
-            if 'gui' in prefs and isinstance(prefs['gui'], dict) and 'message_collapsed' in prefs['gui']:
-                try:
-                    collapsed = prefs['gui']['message_collapsed'].lower() == 'true'
-                    if collapsed != self.message_panel_collapsed:
-                        self.toggle_message_panel()
-                except (AttributeError, KeyError):
-                    pass
-            
             print("[TabbedGUI] Preferences loaded")
             
         except Exception as e:
             print(f"[TabbedGUI] Error loading preferences: {e}")
+    
+    def closeEvent(self, event):
+        """Handle window close event."""
+        print("[TabbedGUI] Close event received")
+        
+        # Stop processing timer first
+        if hasattr(self, 'process_timer'):
+            self.process_timer.stop()
+        
+        # Cleanup calibration panel resources (threads) before saving preferences
+        if hasattr(self.calibration_panel, 'cleanup'):
+            self.calibration_panel.cleanup()
+        
+        # Save preferences before closing
+        self.save_preferences()
+        
+        # Give threads time to cleanup
+        QApplication.processEvents()
+        
+        # Call stop callback if provided
+        try:
+            if callable(self.on_stop_callback):
+                self.on_stop_callback()
+        except Exception:
+            pass
+        
+        # Set stop event
+        if self.stop_event:
+            self.stop_event.set()
+        
+        event.accept()
     
     def save_preferences(self):
         """Save current preferences from all panels."""
@@ -429,10 +702,24 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.camera_panel, 'get_prefs'):
                 prefs['camera'] = self.camera_panel.get_prefs()
             
+            # Get shortcut preferences from preferences panel
+            if hasattr(self.preferences_panel, 'get_shortcut_preferences'):
+                shortcut_prefs = self.preferences_panel.get_shortcut_preferences()
+                if 'calibration' not in prefs:
+                    prefs['calibration'] = {}
+                prefs['calibration'].update(shortcut_prefs)
+            
+            # Get shortcut preferences from preferences panel
+            if hasattr(self.preferences_panel, 'get_shortcut_preferences'):
+                shortcut_prefs = self.preferences_panel.get_shortcut_preferences()
+                if 'calibration' not in prefs:
+                    prefs['calibration'] = {}
+                prefs['calibration'].update(shortcut_prefs)
+            
             # Save GUI state
             prefs['gui'] = {
                 'selected_tab': str(self.tab_widget.currentIndex()),
-                'message_collapsed': str(self.message_panel_collapsed).lower()
+                'theme': self.theme_manager.get_current_theme()
             }
             
             # Save to preferences
@@ -469,16 +756,13 @@ class TabbedGUIWorker(QMainWindow):
         event.accept()
 
 
-def start_gui_worker(serial_control_queue,
-                    fusion_control_queue,
-                    camera_control_queue, 
-                    udp_control_queue,
-                    status_queue,
-                    message_queue,
-                    stop_event,
-                    on_stop_callback=None):
+def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_queue,
+                 udp_control_queue, status_queue, ui_status_queue, message_queue,
+                 serial_display_queue=None, euler_display_queue=None,
+                 translation_display_queue=None, camera_preview_queue=None,
+                 log_queue=None, stop_event=None, on_stop_callback=None):
     """
-    Start the PyQt5 tabbed GUI worker.
+    Start the PyQt5 GUI worker with tabbed interface.
     
     Args:
         serial_control_queue: Queue for serial commands
@@ -487,6 +771,11 @@ def start_gui_worker(serial_control_queue,
         udp_control_queue: Queue for UDP commands
         status_queue: Queue for receiving status updates
         message_queue: Queue for receiving messages
+        serial_display_queue: Queue for raw serial data display
+        euler_display_queue: Queue for orientation angles
+        translation_display_queue: Queue for position data
+        camera_preview_queue: Queue for camera preview frames
+        log_queue: Queue for log messages
         stop_event: Threading event for shutdown coordination
         on_stop_callback: Callback when GUI is closed
     """
@@ -497,6 +786,57 @@ def start_gui_worker(serial_control_queue,
     app.setApplicationName(f"{APP_NAME} - PyQt5")
     app.setOrganizationName("frankentrack")
     
+    # Set application icon for taskbar display
+    try:
+        from workers.gui_qt.managers.icon_helper import set_window_icon
+        from PyQt5.QtGui import QIcon
+        import os
+        
+        # Find icon file
+        start_dir = os.path.dirname(__file__)
+        ico_path = None
+        png_path = None
+        for _ in range(6):
+            candidate_ico = os.path.join(start_dir, '..', '..', 'img', 'icon.ico')
+            candidate_png = os.path.join(start_dir, '..', '..', 'img', 'icon.png')
+            if os.path.exists(candidate_ico):
+                ico_path = candidate_ico
+                break
+            if os.path.exists(candidate_png) and png_path is None:
+                png_path = candidate_png
+            # move up one level
+            parent = os.path.dirname(start_dir)
+            if not parent or parent == start_dir:
+                break
+            start_dir = parent
+        
+        # Set application icon
+        icon_path = ico_path or png_path
+        if icon_path:
+            app_icon = QIcon(icon_path)
+            if not app_icon.isNull():
+                app.setWindowIcon(app_icon)
+                print(f"[TabbedGUI] Application icon set: {icon_path}")
+            else:
+                print(f"[TabbedGUI] Failed to load icon: {icon_path}")
+        else:
+            print("[TabbedGUI] No icon file found")
+            
+    except Exception as e:
+        print(f"[TabbedGUI] Could not set application icon: {e}")
+    
+    # Windows-specific taskbar icon handling
+    try:
+        import platform
+        if platform.system() == "Windows":
+            import ctypes
+            # Set the app ID for proper taskbar grouping
+            app_id = f"frankentrack.{APP_NAME}.{APP_VERSION}"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            print(f"[TabbedGUI] Windows AppUserModelID set: {app_id}")
+    except Exception as e:
+        print(f"[TabbedGUI] Could not set Windows app ID: {e}")
+    
     # Create main window
     main_window = TabbedGUIWorker(
         serial_control_queue=serial_control_queue,
@@ -504,7 +844,101 @@ def start_gui_worker(serial_control_queue,
         camera_control_queue=camera_control_queue,
         udp_control_queue=udp_control_queue,
         status_queue=status_queue,
+        ui_status_queue=ui_status_queue,
         message_queue=message_queue,
+        serial_display_queue=serial_display_queue,
+        euler_display_queue=euler_display_queue,
+        translation_display_queue=translation_display_queue,
+        camera_preview_queue=camera_preview_queue,
+        log_queue=log_queue,
+        stop_event=stop_event,
+        on_stop_callback=on_stop_callback
+    )
+    
+    # Show window
+    main_window.show()
+    
+    print("[TabbedGUI] PyQt5 tabbed GUI started")
+    
+    # Run event loop
+    app.exec_()
+    
+    print("[TabbedGUI] PyQt5 tabbed GUI stopped")
+
+
+def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_queue,
+                 udp_control_queue, status_queue, ui_status_queue, message_queue,
+                 serial_display_queue=None, euler_display_queue=None,
+                 translation_display_queue=None, camera_preview_queue=None,
+                 log_queue=None, stop_event=None, on_stop_callback=None):
+    """
+    Start the PyQt5 GUI worker with tabbed interface.
+    
+    Args:
+        serial_control_queue: Queue for serial worker commands
+        fusion_control_queue: Queue for fusion worker commands  
+        camera_control_queue: Queue for camera worker commands
+        udp_control_queue: Queue for UDP worker commands
+        status_queue: Queue for receiving status updates
+        ui_status_queue: Queue for receiving UI-specific status updates
+        message_queue: Queue for receiving messages
+        serial_display_queue: Queue for raw serial data display
+        euler_display_queue: Queue for orientation angles
+        translation_display_queue: Queue for position data
+        camera_preview_queue: Queue for camera preview frames
+        log_queue: Queue for log messages
+        stop_event: Threading event for shutdown coordination
+        on_stop_callback: Callback when GUI is closed
+    """
+    # Create or get QApplication instance
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    
+    print("[TabbedGUI] Starting PyQt5 tabbed GUI worker...")
+    
+    # Set application icon (same logic as before)
+    try:
+        icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'img', 'icon.ico'))
+        if os.path.exists(icon_path):
+            app_icon = QIcon(icon_path)
+            if not app_icon.isNull():
+                app.setWindowIcon(app_icon)
+                print(f"[TabbedGUI] Application icon set: {icon_path}")
+            else:
+                print(f"[TabbedGUI] Failed to load icon: {icon_path}")
+        else:
+            print("[TabbedGUI] No icon file found")
+            
+    except Exception as e:
+        print(f"[TabbedGUI] Could not set application icon: {e}")
+    
+    # Windows-specific taskbar icon handling
+    try:
+        import platform
+        if platform.system() == "Windows":
+            import ctypes
+            # Set the app ID for proper taskbar grouping
+            app_id = f"frankentrack.{APP_NAME}.{APP_VERSION}"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            print(f"[TabbedGUI] Windows AppUserModelID set: {app_id}")
+    except Exception as e:
+        print(f"[TabbedGUI] Could not set Windows app ID: {e}")
+    
+    # Create main window
+    main_window = TabbedGUIWorker(
+        serial_control_queue=serial_control_queue,
+        fusion_control_queue=fusion_control_queue,
+        camera_control_queue=camera_control_queue,
+        udp_control_queue=udp_control_queue,
+        status_queue=status_queue,
+        ui_status_queue=ui_status_queue,
+        message_queue=message_queue,
+        serial_display_queue=serial_display_queue,
+        euler_display_queue=euler_display_queue,
+        translation_display_queue=translation_display_queue,
+        camera_preview_queue=camera_preview_queue,
+        log_queue=log_queue,
         stop_event=stop_event,
         on_stop_callback=on_stop_callback
     )
