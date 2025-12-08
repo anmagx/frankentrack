@@ -1,20 +1,16 @@
 """
 PyQt5 Orientation Panel for frankentrack GUI.
 
-Displays Euler angles (Yaw, Pitch, Roll), position (X, Y, Z),
-drift correction controls, and orientation reset functionality.
+Display-only panel showing Euler angles (Yaw, Pitch, Roll) and position (X, Y, Z).
+No controls - purely for data visualization.
 """
 from PyQt5.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout, 
-                             QLabel, QPushButton, QComboBox)
-from PyQt5.QtCore import Qt, QTimer
-
-from config.config import QUEUE_PUT_TIMEOUT
-from util.error_utils import safe_queue_put
-from workers.gui_qt.helpers.shortcut_helper import ShortcutManager
+                             QLabel)
+from PyQt5.QtCore import Qt
 
 
 class OrientationPanelQt(QGroupBox):
-    """PyQt5 Panel for orientation and position display with drift correction."""
+    """PyQt5 Panel for orientation and position display (display-only)."""
     
     def __init__(self, parent=None, control_queue=None, message_callback=None, padding=6):
         """
@@ -22,14 +18,11 @@ class OrientationPanelQt(QGroupBox):
         
         Args:
             parent: Parent PyQt5 widget
-            control_queue: Queue for sending commands to fusion worker
-            message_callback: Callable to display messages (e.g., app.append_message)
+            control_queue: Not used (display-only panel)
+            message_callback: Not used (display-only panel) 
             padding: Padding for the frame (default: 6)
         """
         super().__init__("Orientation", parent)
-        
-        self.control_queue = control_queue
-        self.message_callback = message_callback
         
         # Euler angle display labels
         self.yaw_value_label = None
@@ -46,55 +39,19 @@ class OrientationPanelQt(QGroupBox):
         self._y_offset = 0.0
         self._last_raw_translation = (0.0, 0.0, 0.0)
         
-        # Initialize shortcut manager
-        self.shortcut_manager = ShortcutManager(self, message_callback)
-        
         self._build_ui()
     
     def _build_ui(self):
         """Build the orientation panel UI."""
-        # Main layout - single column for data and controls
+        # Main layout - single column for data displays only
         main_layout = QVBoxLayout()
         main_layout.setSpacing(6)
         main_layout.setContentsMargins(4, 2, 4, 2)
         self.setLayout(main_layout)
 
-        # Build components
+        # Build display components
         self._build_euler_displays(main_layout)
         self._build_position_displays(main_layout)
-        self._build_control_row(main_layout)
-
-    def _build_control_row(self, parent_layout):
-        """Build control row with reset buttons and filter selection."""
-        # Create horizontal layout for controls
-        controls_layout = QHBoxLayout()
-        controls_layout.setContentsMargins(6, 0, 6, 0)  # Add horizontal padding
-        
-        # Filter selection (left-aligned)
-        filter_label = QLabel("Filter:")
-        controls_layout.addWidget(filter_label)
-        
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems(['complementary', 'quaternion'])
-        self.filter_combo.setCurrentText('complementary')
-        self.filter_combo.currentTextChanged.connect(self._on_filter_change)
-        controls_layout.addWidget(self.filter_combo)
-        
-        # Add stretch to push buttons to the right
-        controls_layout.addStretch()
-        
-        # Reset orientation button (right-aligned)
-        self.reset_button = QPushButton("Reset Orientation")
-        self.reset_button.clicked.connect(self._on_reset)
-        controls_layout.addWidget(self.reset_button)
-        
-        # Set shortcut button (right-aligned)
-        self.shortcut_button = QPushButton("Set Shortcut...")
-        self.shortcut_button.clicked.connect(self._on_set_shortcut)
-        controls_layout.addWidget(self.shortcut_button)
-        
-        # Add the control layout to parent
-        parent_layout.addLayout(controls_layout)
 
     def _build_euler_displays(self, parent_layout):
         """Build Euler angle (Yaw, Pitch, Roll) display row."""
@@ -151,61 +108,6 @@ class OrientationPanelQt(QGroupBox):
         
         # Add grid to parent layout
         parent_layout.addLayout(position_grid)
-    
-    def _on_filter_change(self, filter_type):
-        """Send filter selection change to fusion worker via control queue."""
-        try:
-            if self.control_queue:
-                # Send tuple command: ('set_filter', 'quaternion'|'complementary')
-                safe_queue_put(self.control_queue, ('set_filter', filter_type), timeout=QUEUE_PUT_TIMEOUT)
-                if self.message_callback:
-                    QTimer.singleShot(0, lambda msg=f"Filter changed to: {filter_type}": self.message_callback(msg))
-        except Exception as ex:
-            if self.message_callback:
-                QTimer.singleShot(0, lambda msg=f"Failed to set filter to: {filter_type} - {ex}": self.message_callback(msg))
-    
-    def _on_set_shortcut(self):
-        """Open dialog to capture a keyboard shortcut for reset orientation."""
-        key, display_name = self.shortcut_manager.capture_shortcut(self.shortcut_manager.reset_shortcut)
-        
-        if key:
-            # Set the shortcut with reset callback
-            success = self.shortcut_manager.set_shortcut(key, display_name, self._on_reset)
-            if success:
-                # Update button text using timer to ensure main thread
-                QTimer.singleShot(0, lambda: self.shortcut_button.setText(f"Shortcut: {display_name}"))
-    
-    def _on_reset(self):
-        """Handle orientation reset button click."""
-        # Send non-destructive orientation reset command to fusion worker.
-        try:
-            if self.control_queue:
-                if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
-                    if self.message_callback:
-                        QTimer.singleShot(0, lambda: self.message_callback("Failed to send reset command"))
-                    return
-        except Exception as ex:
-            if self.message_callback:
-                QTimer.singleShot(0, lambda msg=f"Failed to send reset command: {ex}": self.message_callback(msg))
-            return
-
-        if self.message_callback:
-            QTimer.singleShot(0, lambda: self.message_callback("Orientation reset requested (from GUI)"))
-
-        # Reset translation offsets so displayed X/Y become zero
-        try:
-            lx, ly, lz = self._last_raw_translation
-            # Set offsets so displayed values = raw - offset = 0
-            self._x_offset = float(lx)
-            self._y_offset = float(ly)
-            # Update displayed values to zero
-            self.x_value_label.setText("0.00")
-            self.y_value_label.setText("0.00")
-
-            if self.message_callback:
-                QTimer.singleShot(0, lambda: self.message_callback("Position offsets updated to make current position zero"))
-        except Exception:
-            pass
     
     def update_euler(self, yaw, pitch, roll):
         """
@@ -286,7 +188,7 @@ class OrientationPanelQt(QGroupBox):
         Args:
             prefs: Dictionary with optional preference keys (orientation panel is display-only)
         """
-        # Orientation panel is now display-only, no preferences to restore
+        # Orientation panel is display-only, no preferences to restore
         pass
     
     def reset_position_offsets(self):

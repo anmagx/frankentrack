@@ -35,7 +35,7 @@ def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event,
     print("[GUI Launcher] Starting PyQt5 GUI...")
     
     try:
-        from workers.gui_qt.gui_wrk_qt_tabbed import start_gui_worker
+        from workers.gui_wrk_qt_tabbed import start_gui_worker
         
         def on_stop():
             """Callback when GUI is closed."""

@@ -36,7 +36,8 @@ from config.config import (
     QUEUE_PUT_TIMEOUT,
     CAMERA_LOOP_DELAY,
     CAMERA_OPEN_TIMEOUT,
-    CAPTURE_RETRY_DELAY
+    CAPTURE_RETRY_DELAY,
+    CAMERA_FRAME_SLEEP_MS
 )
 from util.error_utils import safe_queue_put, safe_queue_get, clamp, safe_float_convert
 
@@ -490,12 +491,13 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                     # else: loop took longer than target, don't sleep
                 else:
                     # Minimal sleep to yield CPU when no explicit fps target.
-                    # Use 1ms instead of CAMERA_LOOP_DELAY (20ms) to allow higher FPS.
-                    if loop_elapsed < 0.001:
-                        time.sleep(0.001)
+                    # Use optimized camera frame sleep instead of hardcoded values.
+                    camera_sleep_s = CAMERA_FRAME_SLEEP_MS / 1000.0
+                    if loop_elapsed < camera_sleep_s:
+                        time.sleep(camera_sleep_s)
             except Exception:
                 try:
-                    time.sleep(0.001)
+                    time.sleep(CAMERA_FRAME_SLEEP_MS / 1000.0)
                 except Exception:
                     pass
 

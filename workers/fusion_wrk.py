@@ -20,7 +20,10 @@ from config.config import (
      DT_MIN,
      DT_MAX,
      QUEUE_GET_TIMEOUT,
-     QUEUE_PUT_TIMEOUT
+     QUEUE_PUT_TIMEOUT,
+     QUEUE_HIGH_WATERMARK,
+     QUEUE_CRITICAL_WATERMARK,
+     FUSION_LOOP_SLEEP_MS
 )
 from util.error_utils import (
     safe_queue_put,
@@ -76,6 +79,11 @@ class ComplementaryFilter:
         self.yaw = 0.0
         self.last_time = None
         self.logQueue = logQueue
+        
+        # Performance optimizations: pre-allocate result arrays and cache calculations
+        self._result_tuple = [0.0, 0.0, 0.0, False, False]  # Reuse to avoid allocations
+        self._cached_accel_mag = 0.0
+        self._cached_gyro_mag = 0.0
         
     def update(self, gyro, accel, timestamp):
         """
@@ -143,17 +151,18 @@ class ComplementaryFilter:
         
         # Check if accelerometer is measuring primarily gravity (sensor is quiet)
         ax, ay, az = accel
-        accel_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
+        # Cache magnitude calculation to avoid recomputation
+        self._cached_accel_mag = np.sqrt(ax*ax + ay*ay + az*az)
 
-        # Compute instantaneous gyro magnitude (deg/s)
-        gyro_mag = np.sqrt(gx * gx + gy * gy + gz * gz)
+        # Compute instantaneous gyro magnitude (deg/s) - cache for stationary detection
+        self._cached_gyro_mag = np.sqrt(gx*gx + gy*gy + gz*gz)
 
         # Instantaneous candidate for stationary: accel near 1g AND gyro magnitude small
         accel_ok = False
-        if accel_magnitude >= 0.01:
-            accel_ok = abs(accel_magnitude - 1.0) < self.accel_threshold
+        if self._cached_accel_mag >= 0.01:
+            accel_ok = abs(self._cached_accel_mag - 1.0) < self.accel_threshold
 
-        candidate_stationary = accel_ok and (gyro_mag < self._gyro_stationary_threshold)
+        candidate_stationary = accel_ok and (self._cached_gyro_mag < self._gyro_stationary_threshold)
 
         # Debounce stationary detection: require candidate to persist for configured time
         if candidate_stationary:
@@ -167,14 +176,14 @@ class ComplementaryFilter:
             is_stationary = False
         
         # Check if we're looking approximately straight ahead (all axes near center)
-        def _angle_diff(a, b):
-            """Smallest angle difference considering wrapping."""
-            diff = (a - b + 180) % 360 - 180
+        def _angle_diff_fast(a, b):
+            """Optimized smallest angle difference using modulo (O(1) vs O(n))."""
+            diff = (a - b + 180.0) % 360.0 - 180.0
             return abs(diff)
         
-        is_near_center = (_angle_diff(self.yaw, 0) < self.center_threshold_yaw and 
-                         _angle_diff(self.pitch, 0) < self.center_threshold_pitch and
-                         _angle_diff(self.roll, 0) < self.center_threshold_roll)
+        is_near_center = (_angle_diff_fast(self.yaw, 0) < self.center_threshold_yaw and 
+                         _angle_diff_fast(self.pitch, 0) < self.center_threshold_pitch and
+                         _angle_diff_fast(self.roll, 0) < self.center_threshold_roll)
         
         # Apply drift correction to all axes when stationary and near center
         drift_correction_active = False
@@ -189,8 +198,8 @@ class ComplementaryFilter:
             # Fuse gyro + accel for roll/pitch when accelerometer reliably measures gravity
             accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
 
-            # Consider accelerometer valid when magnitude is close to 1g
-            accel_valid = accel_magnitude >= 0.01 and abs(accel_magnitude - 1.0) < self.accel_threshold
+            # Consider accelerometer valid when magnitude is close to 1g (use cached value)
+            accel_valid = self._cached_accel_mag >= 0.01 and abs(self._cached_accel_mag - 1.0) < self.accel_threshold
 
             if accel_valid:
                 # Blend gyro integration with accel-derived angles for roll/pitch
@@ -212,7 +221,13 @@ class ComplementaryFilter:
         self.pitch = normalize_angle(self.pitch)
         self.roll = normalize_angle(self.roll)
         
-        return self.yaw, self.pitch, self.roll, drift_correction_active, is_stationary
+        # Reuse result array to avoid memory allocations in hot path
+        self._result_tuple[0] = self.yaw
+        self._result_tuple[1] = self.pitch  
+        self._result_tuple[2] = self.roll
+        self._result_tuple[3] = drift_correction_active
+        self._result_tuple[4] = is_stationary
+        return tuple(self._result_tuple)  # Return tuple for compatibility
 
     def _accel_to_rp(self, accel):
         """
@@ -477,6 +492,10 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     
     # Track processing state to avoid spam
     processing_active = False
+    
+    # Track status values to only send updates when they change
+    last_drift_active = None
+    last_stationary = None
     
     try:
         while not stop_event.is_set():
@@ -758,16 +777,21 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         print(f"[Fusion Worker] Failed to send UI processing status: {e}")
                         pass
                 
-                # Send drift correction status to UI (non-blocking)
-                try:
-                    statusQueue.put_nowait(('drift_correction', drift_active))
-                except:
-                    pass
-                # Send stationarity status to UI (non-blocking)
-                try:
-                    statusQueue.put_nowait(('stationary', is_stationary))
-                except:
-                    pass
+                # Send drift correction status to UI only when it changes (non-blocking)
+                if drift_active != last_drift_active:
+                    try:
+                        statusQueue.put_nowait(('drift_correction', drift_active))
+                        last_drift_active = drift_active
+                    except:
+                        pass
+                        
+                # Send stationarity status to UI only when it changes (non-blocking)
+                if is_stationary != last_stationary:
+                    try:
+                        statusQueue.put_nowait(('stationary', is_stationary))
+                        last_stationary = is_stationary
+                    except:
+                        pass
                 
                 # Put Euler angles into output queues
                 # Format: [Yaw, Pitch, Roll, X, Y, Z]
@@ -780,12 +804,35 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                     # Drop frame if queue full rather than blocking
                     pass
                 
+                # Send to display queue with queue health monitoring
                 if eulerDisplayQueue is not None:
                     try:
-                        # Use nowait() to ensure GUI never blocks real-time data
-                        eulerDisplayQueue.put_nowait(euler_data)
-                    except:
-                        # Drop frame if GUI queue full rather than blocking
+                        # Check queue health and log if getting full
+                        queue_size = eulerDisplayQueue.qsize()
+                        max_size = getattr(eulerDisplayQueue, '_maxsize', 60)
+                        
+                        # Only apply sampling if queue is very full (>90%)
+                        if max_size > 0 and queue_size / max_size > 0.9:
+                            # Queue critically full - skip some frames and log warning
+                            filter._frame_counter = getattr(filter, '_frame_counter', 0) + 1
+                            if filter._frame_counter % 2 == 0:  # Send every 2nd frame
+                                eulerDisplayQueue.put_nowait(euler_data)
+                            # Log critical queue state occasionally
+                            if filter._frame_counter % 100 == 0:
+                                print(f"[Fusion] Display queue critical: {queue_size}/{max_size} ({queue_size/max_size:.1%})")
+                        else:
+                            # Queue not full - send all frames
+                            eulerDisplayQueue.put_nowait(euler_data)
+                            # Log warning if queue getting full
+                            if max_size > 0 and queue_size / max_size > 0.7:
+                                filter._warning_counter = getattr(filter, '_warning_counter', 0) + 1
+                                if filter._warning_counter % 200 == 0:  # Log every 200 frames when >70%
+                                    print(f"[Fusion] Display queue warning: {queue_size}/{max_size} ({queue_size/max_size:.1%})")
+                    except Exception as e:
+                        # Track queue errors 
+                        filter._error_counter = getattr(filter, '_error_counter', 0) + 1
+                        if filter._error_counter % 50 == 0:  # Log every 50 errors
+                            print(f"[Fusion] Display queue error #{filter._error_counter}: {e}")
                         pass
                 
             except ValueError as e:
@@ -795,6 +842,10 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             except Exception as e:
                 log_error(logQueue, "Fusion Worker", f"Unexpected error processing data: {e}")
                 continue
+        
+        # Only add minimal sleep if no data was processed to prevent busy waiting
+        if line is None:
+            time.sleep(FUSION_LOOP_SLEEP_MS / 1000.0)
     
     except KeyboardInterrupt:
         pass

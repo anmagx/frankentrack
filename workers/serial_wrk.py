@@ -83,6 +83,10 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
     mps_count = 0
     last_mps_time = time.time()
     report_interval = FPS_REPORT_INTERVAL  # seconds
+    
+    # Track activity to avoid spamming statusQueue
+    last_activity_report = 0
+    activity_report_interval = 2.0  # Only report activity every 2 seconds
 
     while stop_event is None or not stop_event.is_set():
         # Process control commands first (drain queue)
@@ -134,17 +138,29 @@ def serial_thread(messageQueue=None, serialQueue=None, serialDisplayQueue=None, 
             if ser.in_waiting:
                 data = ser.readline().decode('utf-8', errors='ignore').strip()
                 if data:
-                    # forward serial payload
-                    safe_queue_put(serialQueue, data, timeout=QUEUE_PUT_TIMEOUT)
-                    safe_queue_put(serialDisplayQueue, data, timeout=QUEUE_PUT_TIMEOUT)
-                    # notify GUI of data activity
-                    if statusQueue:
-                        safe_queue_put(statusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
-                    if uiStatusQueue:
-                        safe_queue_put(uiStatusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
+                    # forward serial payload with queue monitoring
+                    if not safe_queue_put(serialQueue, data, timeout=QUEUE_PUT_TIMEOUT, 
+                                         log_failures=True, context="Serial data", queue_name="serialQueue"):
+                        # Track drops for diagnostics
+                        drop_count = getattr(ser, '_drop_count', 0) + 1
+                        setattr(ser, '_drop_count', drop_count)
+                        if drop_count % 50 == 0:  # Log every 50 drops
+                            log_error(logQueue, "Serial Worker", f"Dropped {drop_count} frames due to full serialQueue")
+                    
+                    safe_queue_put(serialDisplayQueue, data, timeout=QUEUE_PUT_TIMEOUT, 
+                                  queue_name="serialDisplayQueue")
+                    
+                    # Throttle data activity notifications to avoid flooding statusQueue
+                    now = time.time()
+                    if now - last_activity_report >= activity_report_interval:
+                        if statusQueue:
+                            safe_queue_put(statusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
+                        if uiStatusQueue:
+                            safe_queue_put(uiStatusQueue, ('serial_data', True), timeout=QUEUE_PUT_TIMEOUT)
+                        last_activity_report = now
+                        
                     # count for MPS
                     mps_count += 1
-                    now = time.time()
                     elapsed = now - last_mps_time
                     if elapsed >= report_interval:
                         mps = mps_count / elapsed if elapsed > 0 else 0.0

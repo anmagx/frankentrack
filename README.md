@@ -44,6 +44,7 @@ Nonetheless, thank you Claude.
 * UDP sender for sending into opentrack
 * Central log file (Still work in progress)
 * Multiprocess architecture using queues for IPC
+* Built-in queue health monitoring and diagnostic capabilities
 
 ### Configuration
 * Central configuration file for runtime constants (config/config.py)
@@ -190,6 +191,43 @@ Drift may be influenced by external factors like temperature or humidity, so the
 
 
 [https://www.youtube.com/watch?v=8bVocOTLqhI]: https://www.youtube.com/watch?v=8bVocOTLqhI
+
+## Technical Architecture
+
+### Multiprocess Design
+
+Frankentrack uses a multiprocess architecture with dedicated worker processes for different subsystems:
+
+- **Serial Worker**: Handles incoming IMU data from Arduino/microcontroller
+- **Fusion Worker**: Processes sensor data through complementary filter algorithms  
+- **Camera Worker**: Manages webcam capture and single-point IR tracking
+- **UDP Worker**: Sends processed data to OpenTrack
+- **GUI Worker**: Manages Qt-based user interface and real-time displays
+
+Communication between workers uses high-performance multiprocessing queues with built-in overflow protection.
+
+### Queue Health Monitoring
+
+The system includes comprehensive queue monitoring and diagnostic capabilities:
+
+- **Real-time Health Checks**: Automatic monitoring of all inter-process queues every 10 seconds
+- **Three-tier Status System**: 
+  - `Healthy` (< 70% full): Normal operation
+  - `Warning` (70-90% full): Approaching capacity  
+  - `Critical` (> 90% full): Risk of data loss
+- **Automatic Logging**: Queue health issues are automatically logged with detailed statistics
+- **Performance Diagnostics**: Queue fill ratios and throughput metrics for system tuning
+
+This monitoring system helps prevent queue overflows that could cause tracking interruptions and provides insight into system performance bottlenecks.
+
+### Worker Restart System
+
+Automatic worker recovery ensures system reliability:
+
+- **Crash Detection**: Background monitoring thread detects worker failures
+- **Automatic Restart**: Failed workers are automatically restarted (up to 3 attempts)
+- **Graceful Recovery**: Restart delays prevent rapid restart loops
+- **Configuration Preservation**: Worker settings maintained across restarts
 
 ## License
 
