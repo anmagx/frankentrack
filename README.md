@@ -21,6 +21,10 @@ Frankentrack is the product of unholy union of IMU sensor data fusion and (optio
 
 Since it only processes data coming in over serial, a wide range of sensors and microcontrollers are supported. The only prerequisite is that incoming data must be structured in csv-style for parsing. More on that below. 
 
+## Why? 
+
+This works independently from camera based position tracking, so if you're okay with not having X/Y position tracking, this can be used completely without a camera. That way it's also independent from angle to or distance from your monitor. See more below. 
+
 ## Demonstration
 
 Hardware setup: 
