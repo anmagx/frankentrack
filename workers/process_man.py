@@ -25,7 +25,6 @@ from config.config import (
     QUEUE_SIZE_DATA,
     QUEUE_SIZE_DISPLAY,
     QUEUE_SIZE_CONTROL,
-    QUEUE_SIZE_PREVIEW,
     LOG_FILE_NAME,
     LOG_FILE_MAX_SIZE,
     WORKER_JOIN_TIMEOUT,
@@ -47,15 +46,10 @@ class ProcessHandler:
         ## Init Queues (use config constants)
         self.serialQueue = Queue(maxsize=QUEUE_SIZE_DATA)
         self.eulerQueue = Queue(maxsize=QUEUE_SIZE_DATA)
-        self.translationQueue = Queue(maxsize=QUEUE_SIZE_DATA)
         
         self.serialDisplayQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
         self.eulerDisplayQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
-        self.translationDisplayQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
         
-        # Camera control + preview queues
-        self.cameraControlQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
-        self.cameraPreviewQueue = Queue(maxsize=QUEUE_SIZE_PREVIEW)
         self.udpControlQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
         
         self.messageQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
@@ -244,13 +238,11 @@ class ProcessHandler:
         from workers.serial_wrk import run_worker as run_serial_worker
         from workers.fusion_wrk import run_worker as run_fusion_worker
         from workers.udp_wrk import run_worker as run_udp_worker
-        from workers.camera_wrk import run_worker as run_camera_worker
 
         ## GUI Worker
         gui_args = (self.messageQueue, self.serialDisplayQueue, self.statusQueue, 
                    self.stop_event, self.eulerDisplayQueue, self.controlQueue, 
-                   self.serialControlQueue, self.translationDisplayQueue, 
-                   self.cameraControlQueue, self.cameraPreviewQueue, 
+                   self.serialControlQueue, 
                    self.udpControlQueue, self.logQueue, self.uiStatusQueue)
         gui_worker = Process(
             target = run_gui_worker,
@@ -306,7 +298,7 @@ class ProcessHandler:
         }
 
         ## UDP Worker
-        udp_args = (self.eulerQueue, self.translationQueue, self.stop_event, 
+        udp_args = (self.eulerQueue, None, self.stop_event, 
                    None, None, self.udpControlQueue, self.statusQueue, 
                    self.logQueue)
         udp_worker = Process(
@@ -324,30 +316,7 @@ class ProcessHandler:
             'name': "UDPWorker"
         }
 
-        ## Camera Worker
-        camera_args = (self.translationQueue, self.translationDisplayQueue, 
-                   self.cameraControlQueue, self.stop_event, 
-                   self.cameraPreviewQueue, self.statusQueue, self.logQueue)
-        camera_worker = Process(
-            target = run_camera_worker,
-            args = camera_args,
-            name = "CameraWorker"
-        )
-        camera_worker.start()
-        self.workers.append(camera_worker)
-        
-        # Store configuration for restart capability
-        self._worker_configs["CameraWorker"] = {
-            'target': run_camera_worker,
-            'args': camera_args,
-            'name': "CameraWorker"
-        }
-        
-        # Print process details for debugging worker startup
-        try:
-            print(f"[ProcessHandler] Started CameraWorker pid={camera_worker.pid} alive={camera_worker.is_alive()}")
-        except Exception:
-            pass
+
 
         print("[ProcessHandler] All workers started.")
         
@@ -360,10 +329,6 @@ class ProcessHandler:
             'eulerQueue': self.eulerQueue, 
             'eulerDisplayQueue': self.eulerDisplayQueue,
             'serialDisplayQueue': self.serialDisplayQueue,
-            'translationQueue': self.translationQueue,
-            'translationDisplayQueue': self.translationDisplayQueue,
-            'cameraControlQueue': self.cameraControlQueue,
-            'cameraPreviewQueue': self.cameraPreviewQueue,
             'controlQueue': self.controlQueue,
             'statusQueue': self.statusQueue,
             'messageQueue': self.messageQueue,

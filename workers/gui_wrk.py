@@ -1,9 +1,8 @@
 """
 PyQt5 GUI Worker with Tabbed Layout for frankentrack.
 
-This is a slimmed-down tabbed interface that organizes panels into two focused views:
+This is a slimmed-down tabbed interface that organizes panels into focused views:
 - Orientation Tracking: Serial, Message, Calibration, Orientation, Network panels
-- Position Tracking: Camera panel
 
 The Message Panel can be collapsed/expanded to save space when not needed.
 """
@@ -27,7 +26,6 @@ from workers.gui_qt.panels.network_panel import NetworkPanelQt
 from workers.gui_qt.panels.message_panel import MessagePanelQt
 from workers.gui_qt.panels.orientation_panel import OrientationPanelQt
 from workers.gui_qt.panels.calibration_panel import CalibrationPanelQt
-from workers.gui_qt.panels.camera_panel import CameraPanelQt
 from workers.gui_qt.panels.status_bar import StatusBarQt
 from workers.gui_qt.panels.preferences_panel import PreferencesPanel
 from workers.gui_qt.panels.about_panel import AboutPanel
@@ -46,18 +44,15 @@ class TabbedGUISignals(QObject):
     """Signals for the tabbed GUI worker."""
     status_update = pyqtSignal(str, str)  # section, message
     orientation_update = pyqtSignal(float, float, float)  # roll, pitch, yaw
-    position_update = pyqtSignal(float, float, float)  # x, y, z
     drift_status_update = pyqtSignal(str)  # status
-    preview_update = pyqtSignal(bytes)  # jpeg_data
 
 
 class TabbedGUIWorker(QMainWindow):
     """PyQt5 GUI worker with tabbed layout for frankentrack."""
 
-    def __init__(self, serial_control_queue, fusion_control_queue, camera_control_queue,
+    def __init__(self, serial_control_queue, fusion_control_queue,
                  udp_control_queue, status_queue, ui_status_queue, message_queue,
                  serial_display_queue=None, euler_display_queue=None,
-                 translation_display_queue=None, camera_preview_queue=None,
                  log_queue=None, stop_event=None, on_stop_callback=None):
         """
         Initialize the tabbed GUI worker.
@@ -65,15 +60,13 @@ class TabbedGUIWorker(QMainWindow):
         Args:
             serial_control_queue: Queue for serial worker commands
             fusion_control_queue: Queue for fusion worker commands  
-            camera_control_queue: Queue for camera worker commands
             udp_control_queue: Queue for UDP worker commands
             status_queue: Queue for receiving status updates
             ui_status_queue: Queue for receiving UI-specific status updates
             message_queue: Queue for receiving messages
             serial_display_queue: Queue for raw serial data display
             euler_display_queue: Queue for orientation angles
-            translation_display_queue: Queue for position data
-            camera_preview_queue: Queue for camera preview frames
+            translation_display_queue: Queue for position data  
             log_queue: Queue for log messages
             stop_event: Threading event for shutdown coordination
             on_stop_callback: Callback when GUI is closed
@@ -83,15 +76,12 @@ class TabbedGUIWorker(QMainWindow):
         # Store queues and state
         self.serial_control_queue = serial_control_queue
         self.fusion_control_queue = fusion_control_queue
-        self.camera_control_queue = camera_control_queue
         self.udp_control_queue = udp_control_queue
         self.status_queue = status_queue
         self.ui_status_queue = ui_status_queue
         self.message_queue = message_queue
         self.serial_display_queue = serial_display_queue
         self.euler_display_queue = euler_display_queue
-        self.translation_display_queue = translation_display_queue
-        self.camera_preview_queue = camera_preview_queue
         self.log_queue = log_queue
         self.stop_event = stop_event
         self.on_stop_callback = on_stop_callback
@@ -139,7 +129,6 @@ class TabbedGUIWorker(QMainWindow):
         
         # Create tabs
         self.create_orientation_tab()
-        self.create_position_tab()
         self.create_messages_tab()
         self.create_preferences_tab()
         self.create_about_tab()
@@ -198,26 +187,7 @@ class TabbedGUIWorker(QMainWindow):
         # Add tab
         self.tab_widget.addTab(orientation_widget, "🧭 Orientation Tracking")
     
-    def create_position_tab(self):
-        """Create the Position Tracking tab."""
-        position_widget = QWidget()
-        layout = QVBoxLayout(position_widget)
-        layout.setSpacing(8)
-        layout.setContentsMargins(8, 8, 8, 8)
-        
-        # Camera Panel (main focus of this tab)
-        self.camera_panel = CameraPanelQt(
-            self.camera_control_queue,
-            self.message_queue,
-            position_widget
-        )
-        layout.addWidget(self.camera_panel)
-        
-        # Add stretch to center the camera panel
-        layout.addStretch()
-        
-        # Add tab
-        self.tab_widget.addTab(position_widget, "📹 Position Tracking")
+
 
     def create_messages_tab(self):
         """Create the Messages tab with serial monitor and application logs."""
@@ -283,9 +253,7 @@ class TabbedGUIWorker(QMainWindow):
         """Connect internal signals to update methods."""
         self.signals.status_update.connect(self._update_status_bar)
         self.signals.orientation_update.connect(self._update_orientation)
-        self.signals.position_update.connect(self._update_position)
         self.signals.drift_status_update.connect(self._update_drift_status)
-        self.signals.preview_update.connect(self._update_preview)
     
     def setup_timers(self):
         """Setup update timers."""
@@ -358,15 +326,13 @@ class TabbedGUIWorker(QMainWindow):
                                     yaw, pitch, roll = euler[0], euler[1], euler[2]
                                     self.signals.orientation_update.emit(roll, pitch, yaw)
                             elif 'position' in item:
-                                # Position update from fusion worker
-                                pos = item['position']
-                                if len(pos) >= 3:
-                                    self.signals.position_update.emit(pos[0], pos[1], pos[2])
+                                # Position updates removed with camera functionality
+                                pass
                             elif 'drift_status' in item:
                                 self.signals.drift_status_update.emit(item['drift_status'])
                             elif 'preview_data' in item:
-                                # Camera preview data
-                                self.signals.preview_update.emit(item['preview_data'])
+                                # Camera preview data (camera functionality removed)
+                                pass
                         elif isinstance(item, str):
                             # Simple string status
                             self.signals.status_update.emit('general', item)
@@ -418,10 +384,7 @@ class TabbedGUIWorker(QMainWindow):
         if hasattr(self.orientation_panel, 'update_euler'):
             self.orientation_panel.update_euler(yaw, pitch, roll)
     
-    def _update_position(self, x: float, y: float, z: float):
-        """Update position display."""
-        if hasattr(self.orientation_panel, 'update_position'):
-            self.orientation_panel.update_position(x, y, z)
+    # Position update functionality removed
     
     def _update_drift_status(self, status):
         """Update drift status display."""
@@ -434,10 +397,7 @@ class TabbedGUIWorker(QMainWindow):
                 active = 'active' in str(status).lower() or 'true' in str(status).lower()
             self.orientation_panel.update_drift_status(active)
     
-    def _update_preview(self, jpeg_data: bytes):
-        """Update camera preview."""
-        if hasattr(self.camera_panel, 'update_preview'):
-            self.camera_panel.update_preview(jpeg_data)
+    # Camera preview functionality removed
     
     def _handle_status_update(self, status_type: str, value):
         """Handle specific status updates from workers."""
@@ -502,31 +462,6 @@ class TabbedGUIWorker(QMainWindow):
                     self.message_panel.update_displays()
             
             # Note: Euler/orientation updates moved to process_queues() for real-time performance
-            
-            # Process translation display queue for position data
-            if self.translation_display_queue:
-                trans_count = 0
-                while trans_count < 10 and not self.translation_display_queue.empty():
-                    try:
-                        trans_data = self.translation_display_queue.get_nowait()
-                        if isinstance(trans_data, (list, tuple)) and len(trans_data) >= 3:
-                            if hasattr(self.orientation_panel, 'update_position'):
-                                self.orientation_panel.update_position(*trans_data[:3])
-                        trans_count += 1
-                    except:
-                        break
-            
-            # Process camera preview queue
-            if self.camera_preview_queue:
-                preview_count = 0
-                while preview_count < 3 and not self.camera_preview_queue.empty():
-                    try:
-                        preview_data = self.camera_preview_queue.get_nowait()
-                        if hasattr(self.camera_panel, 'update_preview'):
-                            self.camera_panel.update_preview(preview_data)
-                        preview_count += 1
-                    except:
-                        break
                         
         except Exception as e:
             # Silently handle display queue errors to avoid spam
@@ -547,8 +482,6 @@ class TabbedGUIWorker(QMainWindow):
                 self.status_bar.update_message_rate(float(value))
             elif status_type == 'send_rate' and hasattr(self.status_bar, 'update_send_rate'):
                 self.status_bar.update_send_rate(float(value))
-            elif status_type == 'cam_fps' and hasattr(self.status_bar, 'update_camera_fps'):
-                self.status_bar.update_camera_fps(float(value))
             elif status_type == 'stationary' and hasattr(self.status_bar, 'update_device_status'):
                 self.status_bar.update_device_status(bool(value))
             elif status_type == 'serial_connection' and hasattr(self.serial_panel, 'update_connection_status'):
@@ -622,8 +555,7 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.calibration_panel, 'set_prefs') and 'calibration' in prefs:
                 self.calibration_panel.set_prefs(prefs['calibration'])
             
-            if hasattr(self.camera_panel, 'set_prefs') and 'camera' in prefs:
-                self.camera_panel.set_prefs(prefs['camera'])
+            # Camera panel functionality removed
             
             # Load shortcut preferences into preferences panel
             if hasattr(self.preferences_panel, 'load_shortcut_preferences') and 'calibration' in prefs:
@@ -697,8 +629,7 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.calibration_panel, 'get_prefs'):
                 prefs['calibration'] = self.calibration_panel.get_prefs()
             
-            if hasattr(self.camera_panel, 'get_prefs'):
-                prefs['camera'] = self.camera_panel.get_prefs()
+            # Camera panel functionality removed
             
             # Get shortcut preferences from preferences panel
             if hasattr(self.preferences_panel, 'get_shortcut_preferences'):
@@ -730,10 +661,9 @@ class TabbedGUIWorker(QMainWindow):
             print(f"[GUI] Error saving preferences: {e}")
 
 
-def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_queue,
-                 udp_control_queue, status_queue, ui_status_queue, message_queue,
-                 serial_display_queue=None, euler_display_queue=None,
-                 translation_display_queue=None, camera_preview_queue=None,
+def start_gui_worker(serial_control_queue, fusion_control_queue,
+                     udp_control_queue, status_queue, ui_status_queue, message_queue,
+                     serial_display_queue=None, euler_display_queue=None,
                  log_queue=None, stop_event=None, on_stop_callback=None):
     """
     Start the PyQt5 GUI worker with tabbed interface.
@@ -741,15 +671,12 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
     Args:
         serial_control_queue: Queue for serial worker commands
         fusion_control_queue: Queue for fusion worker commands  
-        camera_control_queue: Queue for camera worker commands
         udp_control_queue: Queue for UDP worker commands
         status_queue: Queue for receiving status updates
         ui_status_queue: Queue for receiving UI-specific status updates
         message_queue: Queue for receiving messages
         serial_display_queue: Queue for raw serial data display
         euler_display_queue: Queue for orientation angles
-        translation_display_queue: Queue for position data
-        camera_preview_queue: Queue for camera preview frames
         log_queue: Queue for log messages
         stop_event: Threading event for shutdown coordination
         on_stop_callback: Callback when GUI is closed
@@ -793,15 +720,12 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
     main_window = TabbedGUIWorker(
         serial_control_queue=serial_control_queue,
         fusion_control_queue=fusion_control_queue,
-        camera_control_queue=camera_control_queue,
         udp_control_queue=udp_control_queue,
         status_queue=status_queue,
         ui_status_queue=ui_status_queue,
         message_queue=message_queue,
         serial_display_queue=serial_display_queue,
         euler_display_queue=euler_display_queue,
-        translation_display_queue=translation_display_queue,
-        camera_preview_queue=camera_preview_queue,
         log_queue=log_queue,
         stop_event=stop_event,
         on_stop_callback=on_stop_callback
@@ -820,26 +744,23 @@ def start_gui_worker(serial_control_queue, fusion_control_queue, camera_control_
 
 def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event, 
                eulerDisplayQueue, controlQueue, serialControlQueue, 
-               translationDisplayQueue, cameraControlQueue, cameraPreviewQueue, 
                udpControlQueue, logQueue, uiStatusQueue):
     """
     Compatibility wrapper for the process manager.
     
     This function maintains the same interface as the original launcher
     to ensure compatibility with the existing process manager.
+    Camera functionality has been removed.
     """
     start_gui_worker(
         serial_control_queue=serialControlQueue,
         fusion_control_queue=controlQueue,
-        camera_control_queue=cameraControlQueue,
         udp_control_queue=udpControlQueue,
         status_queue=statusQueue,
         ui_status_queue=uiStatusQueue,
         message_queue=messageQueue,
         serial_display_queue=serialDisplayQueue,
         euler_display_queue=eulerDisplayQueue,
-        translation_display_queue=translationDisplayQueue,
-        camera_preview_queue=cameraPreviewQueue,
         log_queue=logQueue,
         stop_event=stop_event,
         on_stop_callback=lambda: stop_event.set()
@@ -856,8 +777,7 @@ if __name__ == "__main__":
     
     test_queues = {
         'serial': queue.Queue(),
-        'fusion': queue.Queue(), 
-        'camera': queue.Queue(),
+        'fusion': queue.Queue(),
         'udp': queue.Queue(),
         'status': queue.Queue(),
         'message': queue.Queue()
@@ -873,7 +793,6 @@ if __name__ == "__main__":
     start_gui_worker(
         serial_control_queue=test_queues['serial'],
         fusion_control_queue=test_queues['fusion'],
-        camera_control_queue=test_queues['camera'],
         udp_control_queue=test_queues['udp'],
         status_queue=test_queues['status'],
         message_queue=test_queues['message'],

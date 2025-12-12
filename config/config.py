@@ -20,7 +20,6 @@ GUI_UPDATE_INTERVAL_MS = 16          # How often GUI updates displays (milliseco
 WORKER_QUEUE_CHECK_INTERVAL_MS = 50   # How often GUI checks queues (milliseconds) - balanced for responsiveness
 
 # Worker timing constants
-CAMERA_FRAME_SLEEP_MS = 33  # ~30 FPS camera capture (was hardcoded 0.01)
 FUSION_LOOP_SLEEP_MS = 1    # Minimal sleep in fusion loop (was hardcoded)
 FUSION_DT_MAX_THRESHOLD = 0.1  # Max delta time before reset (was hardcoded)
 
@@ -40,10 +39,9 @@ SERIAL_TIMEOUT = 1.0  # seconds
 # ============================================================================
 # Queue Configuration  
 # ============================================================================
-QUEUE_SIZE_DATA = 300  # For data pipelines (serial, euler, translation) - 2.5s buffer at 120Hz
+QUEUE_SIZE_DATA = 300  # For data pipelines (serial, euler) - 2.5s buffer at 120Hz
 QUEUE_SIZE_DISPLAY = 60  # For display-only queues - 500ms buffer for smooth updates
 QUEUE_SIZE_CONTROL = 10  # For control command queues
-QUEUE_SIZE_PREVIEW = 12  # For camera preview (larger buffer to reduce dropped frames)
 
 # Queue monitoring thresholds
 QUEUE_HIGH_WATERMARK = 0.8  # Trigger adaptive sampling when queue is 80% full
@@ -59,6 +57,9 @@ QUEUE_PUT_TIMEOUT = 0.001  # seconds - very fast timeout for real-time performan
 QUEUE_GET_TIMEOUT = 0.5  # seconds
 WORKER_JOIN_TIMEOUT = 2.0  # seconds to wait for worker shutdown
 STALE_DETECTION_TIMEOUT = 2.0  # seconds before considering detection stale
+
+# GUI component timeouts
+THRESH_DEBOUNCE_MS = 150  # milliseconds - debounce slider changes in GUI panels
 
 # Error recovery timeouts
 WORKER_RESTART_DELAY = 1.0  # seconds to wait before restarting failed worker
@@ -92,35 +93,7 @@ STATIONARY_DEBOUNCE_S = 0.15
 # Set to 0 to disable startup calibration and rely solely on online estimator.
 GYRO_BIAS_CAL_SAMPLES = 400
 
-# ============================================================================
-# Camera / Computer Vision
-# ============================================================================
-DEFAULT_CAMERA_INDEX = 0
-DEFAULT_CAMERA_FPS = 30
-DEFAULT_CAMERA_WIDTH = 640
-DEFAULT_CAMERA_HEIGHT = 480
-CAMERA_LOOP_DELAY = 0.02  # seconds between frame captures
-CAPTURE_RETRY_DELAY = 0.05  # seconds between camera open attempts
-# How long to wait for `cv2.VideoCapture` to report open before giving up.
-# This is polled with `cap.isOpened()`; the constructor itself may still
-# block in some backends, but this prevents long waits after construction.
-CAMERA_OPEN_TIMEOUT = 2.0  # seconds to wait for camera to open
 
-# Detection thresholds
-DEFAULT_DETECTION_THRESHOLD = 220  # 0-255 brightness threshold
-MIN_BLOB_AREA = 6  # pixels: minimum contour area to consider
-
-# Preview settings
-PREVIEW_WIDTH = 320
-PREVIEW_HEIGHT = 240
-JPEG_QUALITY = 60  # 0-100
-
-# Position smoothing
-LOWPASS_ALPHA = 0.18  # smoothing factor for position tracking
-
-# Position output clamping
-POSITION_CLAMP_MIN = -30.0  # cm or arbitrary units
-POSITION_CLAMP_MAX = 30.0
 
 # ============================================================================
 # Network / UDP
