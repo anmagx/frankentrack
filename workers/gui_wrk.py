@@ -34,7 +34,7 @@ from workers.gui_qt.panels.hold_panel import HoldPanelQt
 
 from workers.gui_qt.managers.preferences_manager import PreferencesManager
 from workers.gui_qt.helpers.icon_helper import set_window_icon
-from workers.gui_qt.theme_manager import ThemeManager
+from workers.gui_qt.managers.theme_manager import ThemeManager
 
 from config.config import (
     GUI_UPDATE_INTERVAL_MS, WORKER_QUEUE_CHECK_INTERVAL_MS,

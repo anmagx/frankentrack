@@ -20,11 +20,26 @@ class ThemeManager:
         self.app = app or QApplication.instance()
         self.current_theme = 'light'
         
-        # Calculate path to themes directory
-        current_dir = os.path.dirname(__file__)  # workers/gui_qt/
-        workers_dir = os.path.dirname(current_dir)  # workers/
-        project_root = os.path.dirname(workers_dir)  # frankentrack/
-        self.themes_dir = os.path.join(project_root, 'themes')
+        # Calculate path to themes directory by searching upward from this file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        search_dir = current_dir
+        found = False
+        # Walk upward until we find a 'themes' directory or reach filesystem root
+        while True:
+            candidate = os.path.join(search_dir, 'themes')
+            if os.path.isdir(candidate):
+                self.themes_dir = candidate
+                found = True
+                break
+            parent = os.path.dirname(search_dir)
+            if not parent or parent == search_dir:
+                break
+            search_dir = parent
+
+        # Fallback: assume project root is two levels up (workers/gui_qt -> project)
+        if not found:
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            self.themes_dir = os.path.join(project_root, 'themes')
         
     def load_theme(self, theme_name):
         """
