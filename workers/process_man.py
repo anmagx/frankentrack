@@ -60,6 +60,10 @@ class ProcessHandler:
         self.uiStatusQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)  # Dedicated UI status queue
         self.logQueue = Queue(maxsize=QUEUE_SIZE_DISPLAY)
         
+        # Input worker queues
+        self.inputCommandQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
+        self.inputResponseQueue = Queue(maxsize=QUEUE_SIZE_CONTROL)
+        
         ## Init stop event
         self.stop_event = Event()
         
@@ -238,12 +242,31 @@ class ProcessHandler:
         from workers.serial_wrk import run_worker as run_serial_worker
         from workers.fusion_wrk import run_worker as run_fusion_worker
         from workers.udp_wrk import run_worker as run_udp_worker
+        from workers.input_wrk import run_worker as run_input_worker
+
+        ## Input Worker (start first to handle shortcuts early)
+        input_args = (self.inputCommandQueue, self.inputResponseQueue, self.stop_event, self.logQueue)
+        input_worker = Process(
+            target = run_input_worker,
+            args = input_args,
+            name = "InputWorker"
+        )
+        input_worker.start()
+        self.workers.append(input_worker)
+        
+        # Store configuration for restart capability
+        self._worker_configs["InputWorker"] = {
+            'target': run_input_worker,
+            'args': input_args,
+            'name': "InputWorker"
+        }
 
         ## GUI Worker
         gui_args = (self.messageQueue, self.serialDisplayQueue, self.statusQueue, 
                    self.stop_event, self.eulerDisplayQueue, self.controlQueue, 
                    self.serialControlQueue, 
-                   self.udpControlQueue, self.logQueue, self.uiStatusQueue)
+                   self.udpControlQueue, self.logQueue, self.uiStatusQueue,
+                   self.inputCommandQueue, self.inputResponseQueue)
         gui_worker = Process(
             target = run_gui_worker,
             args = gui_args,

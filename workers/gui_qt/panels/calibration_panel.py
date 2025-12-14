@@ -5,18 +5,12 @@ Contains drift correction angle control, and runtime
 controls for resetting orientation and recalibrating gyro bias.
 """
 from PyQt5.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout,
-                             QLabel, QPushButton, QSlider, QFrame, QWidget, QComboBox, QDialog, QApplication, QShortcut)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+                             QLabel, QPushButton, QSlider, QFrame, QWidget, QComboBox, QDialog, QApplication)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QKeySequence
 
 import math
-
-# Try to import pygame for gamepad/joystick support
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
+import queue
 
 from config.config import (
     DEFAULT_CENTER_THRESHOLD,
@@ -26,112 +20,27 @@ from config.config import (
     VISUALIZATION_SIZE
 )
 from util.error_utils import safe_queue_put
-from workers.gui_qt.helpers.shortcut_helper import ShortcutManager
-
-
-class InputCaptureThread(QThread):
-    """Thread to capture gamepad/joystick inputs without blocking the UI."""
-    
-    input_captured = pyqtSignal(str, str)  # (key_id, display_name)
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.running = False
-        
-    def run(self):
-        """Run the input capture loop."""
-        if not PYGAME_AVAILABLE:
-            return
-            
-        try:
-            # Initialize pygame without setting environment variables to avoid Qt conflicts
-            pygame.mixer.quit()  # Disable sound to reduce conflicts
-            pygame.init()
-            
-            # Only initialize joystick subsystem
-            if pygame.get_init():
-                pygame.joystick.init()
-            else:
-                return
-            
-            # Get list of connected joysticks
-            joystick_count = pygame.joystick.get_count()
-            joysticks = []
-            
-            for i in range(joystick_count):
-                joy = pygame.joystick.Joystick(i)
-                joy.init()
-                joysticks.append(joy)
-            
-            self.running = True
-            clock = pygame.time.Clock()
-            
-            while self.running:
-                pygame.event.pump()
-                
-                # Check each joystick for button presses
-                for i, joystick in enumerate(joysticks):
-                    # Check buttons
-                    for button_id in range(joystick.get_numbuttons()):
-                        if joystick.get_button(button_id):
-                            joy_name = joystick.get_name()
-                            key_id = f"joy{i}_button{button_id}"
-                            display_name = f"{joy_name} Button {button_id + 1}"
-                            self.input_captured.emit(key_id, display_name)
-                            self.running = False
-                            return
-                    
-                    # Check hat (D-pad) inputs
-                    for hat_id in range(joystick.get_numhats()):
-                        hat = joystick.get_hat(hat_id)
-                        if hat != (0, 0):  # Any direction pressed
-                            joy_name = joystick.get_name()
-                            direction = ""
-                            if hat[0] == -1: direction += "Left"
-                            elif hat[0] == 1: direction += "Right"
-                            if hat[1] == -1: direction += "Down"
-                            elif hat[1] == 1: direction += "Up"
-                            
-                            key_id = f"joy{i}_hat{hat_id}_{hat[0]}_{hat[1]}"
-                            display_name = f"{joy_name} D-pad {direction}"
-                            self.input_captured.emit(key_id, display_name)
-                            self.running = False
-                            return
-                
-                clock.tick(60)  # 60 FPS polling
-                
-        except Exception as e:
-            # Silently handle input capture errors
-            pass
-        finally:
-            try:
-                if pygame.get_init():
-                    pygame.quit()
-            except Exception:
-                pass
-    
-    def stop(self):
-        """Stop the capture thread."""
-        self.running = False
 
 
 class KeyCaptureDialog(QDialog):
-    """Simple dialog to capture a single keyboard key."""
+    """Dialog to capture keyboard and gamepad input via input worker."""
     
-    def __init__(self, parent=None, current_key=None):
+    def __init__(self, parent=None, current_key=None, input_command_queue=None, input_response_queue=None):
         super().__init__(parent)
         self.setWindowTitle("Capture Reset Shortcut")
         self.setModal(True)
         self.resize(300, 150)
         
+        # Store input worker queues
+        self.input_command_queue = input_command_queue
+        self.input_response_queue = input_response_queue
+        
         # Apply dark mode styling if parent uses dark theme
         if parent:
-            # Check if parent is using dark theme by examining background color
             bg_color = parent.palette().color(parent.backgroundRole())
             is_dark = bg_color.value() < 128
             
             if is_dark:
-                # Apply dark theme stylesheet
                 dark_style = """
                 QDialog {
                     background-color: #2b2b2b;
@@ -178,39 +87,60 @@ class KeyCaptureDialog(QDialog):
         
         self.setLayout(layout)
         
-        # Start gamepad capture thread
-        if PYGAME_AVAILABLE:
+        # Start input capture via input worker
+        if self.input_command_queue:
             try:
-                self.capture_thread = InputCaptureThread()
-                self.capture_thread.input_captured.connect(self._on_gamepad_input)
-                self.capture_thread.start()
-            except Exception:
-                self.capture_thread = None
-                self.status_label.setText("Gamepad support not available")
+                self.input_command_queue.put(('start_capture',))
+                print("[KeyCaptureDialog] Sent start_capture command to input worker")
+                # Start timer to check for responses
+                self.response_timer = QTimer()
+                self.response_timer.timeout.connect(self._check_input_response)
+                self.response_timer.start(50)  # Check every 50ms
+            except Exception as e:
+                print(f"[KeyCaptureDialog] Error starting capture: {e}")
+                self.status_label.setText("Input capture unavailable")
         else:
-            self.capture_thread = None
-            self.status_label.setText("Gamepad support not available")
+            print("[KeyCaptureDialog] No input command queue available")
+            self.status_label.setText("Input capture unavailable")
     
-    def _on_gamepad_input(self, key_id, display_name):
-        """Handle gamepad input capture."""
-        self.captured_key = key_id
-        self.display_name = display_name
-        self.status_label.setText(f"Captured: {display_name}")
-        QApplication.processEvents()
-        QTimer.singleShot(500, self.accept)
+    def _check_input_response(self):
+        """Check for responses from input worker."""
+        if not self.input_response_queue:
+            return
+            
+        try:
+            response = self.input_response_queue.get_nowait()
+            print(f"[KeyCaptureDialog] Received response from input worker: {response}")
+            if response and len(response) >= 3 and response[0] == 'input_captured':
+                self.captured_key = response[1]
+                self.display_name = response[2]
+                print(f"[KeyCaptureDialog] Captured input: key={self.captured_key}, display={self.display_name}")
+                self.status_label.setText(f"Captured: {self.display_name}")
+                QApplication.processEvents()
+                QTimer.singleShot(500, self.accept)
+        except queue.Empty:
+            pass  # No response available
+        except Exception as e:
+            print(f"[KeyCaptureDialog] Error checking response: {e}")
     
     def closeEvent(self, event):
         """Clean up when dialog closes."""
-        if hasattr(self, 'capture_thread') and self.capture_thread:
+        if hasattr(self, 'response_timer'):
+            self.response_timer.stop()
+        
+        # Only stop capture if dialog was rejected (not accepted)
+        # When accepted, preferences_panel will send set_shortcut which starts the appropriate listener
+        if self.result() != QDialog.Accepted and self.input_command_queue:
             try:
-                self.capture_thread.stop()
-                self.capture_thread.wait(1000)  # Wait up to 1 second
-            except Exception:
-                pass
+                self.input_command_queue.put(('stop_capture',))
+                print("[KeyCaptureDialog] Dialog cancelled - sent stop_capture command to input worker")
+            except Exception as e:
+                print(f"[KeyCaptureDialog] Error stopping capture: {e}")
+        
         super().closeEvent(event)
     
     def keyPressEvent(self, event):
-        """Capture the pressed key."""
+        """Capture keyboard input directly."""
         key = event.key()
         
         # ESC to cancel
@@ -220,22 +150,12 @@ class KeyCaptureDialog(QDialog):
             
         # Map numpad keys to their string representations
         numpad_keys = {
-            0x01000030: 'KP_0',  # Qt.Key_0 on numpad
-            0x01000031: 'KP_1',  # Qt.Key_1 on numpad
-            0x01000032: 'KP_2',
-            0x01000033: 'KP_3',
-            0x01000034: 'KP_4',
-            0x01000035: 'KP_5',
-            0x01000036: 'KP_6',
-            0x01000037: 'KP_7',
-            0x01000038: 'KP_8',
-            0x01000039: 'KP_9',
-            0x01000041: 'KP_Decimal',  # Qt.Key_Period on numpad
-            0x01000042: 'KP_Divide',
-            0x01000043: 'KP_Multiply',
-            0x01000044: 'KP_Subtract',
-            0x01000045: 'KP_Add',
-            0x01000046: 'KP_Enter',    # Qt.Key_Enter on numpad
+            0x01000030: 'KP_0', 0x01000031: 'KP_1', 0x01000032: 'KP_2',
+            0x01000033: 'KP_3', 0x01000034: 'KP_4', 0x01000035: 'KP_5',
+            0x01000036: 'KP_6', 0x01000037: 'KP_7', 0x01000038: 'KP_8',
+            0x01000039: 'KP_9', 0x01000041: 'KP_Decimal', 0x01000042: 'KP_Divide',
+            0x01000043: 'KP_Multiply', 0x01000044: 'KP_Subtract',
+            0x01000045: 'KP_Add', 0x01000046: 'KP_Enter'
         }
         
         # Check if it's a numpad key
@@ -260,98 +180,6 @@ class KeyCaptureDialog(QDialog):
         
         self.status_label.setText(f"Captured: {self.display_name}")
         QTimer.singleShot(500, self.accept)
-
-
-class GamepadMonitorThread(QThread):
-    """Thread to monitor gamepad inputs for reset shortcut activation."""
-    
-    shortcut_triggered = pyqtSignal()
-    
-    def __init__(self, key_id, parent=None):
-        super().__init__(parent)
-        self.key_id = key_id
-        self.running = False
-        
-        # Parse the key_id to get joystick and button/hat info
-        self.joy_id = None
-        self.button_id = None
-        self.hat_id = None
-        self.hat_value = None
-        
-        if key_id.startswith("joy") and "_button" in key_id:
-            # Format: joy0_button3
-            parts = key_id.split("_")
-            self.joy_id = int(parts[0][3:])  # Remove "joy" prefix
-            self.button_id = int(parts[1][6:])  # Remove "button" prefix
-        elif key_id.startswith("joy") and "_hat" in key_id:
-            # Format: joy0_hat0_1_0
-            parts = key_id.split("_")
-            self.joy_id = int(parts[0][3:])
-            self.hat_id = int(parts[1][3:])  # Remove "hat" prefix
-            self.hat_value = (int(parts[2]), int(parts[3]))
-    
-    def run(self):
-        """Monitor for the specific gamepad input."""
-        if not PYGAME_AVAILABLE or self.joy_id is None:
-            return
-            
-        try:
-            # Initialize pygame without setting environment variables to avoid Qt conflicts
-            pygame.mixer.quit()  # Disable sound to reduce conflicts
-            pygame.init()
-            
-            # Only initialize joystick subsystem
-            if pygame.get_init():
-                pygame.joystick.init()
-            else:
-                return
-            
-            if pygame.joystick.get_count() <= self.joy_id:
-                return  # Joystick not connected
-            
-            joystick = pygame.joystick.Joystick(self.joy_id)
-            joystick.init()
-            
-            self.running = True
-            clock = pygame.time.Clock()
-            
-            while self.running:
-                pygame.event.pump()
-                
-                triggered = False
-                
-                if self.button_id is not None:
-                    # Monitor button press
-                    if self.button_id < joystick.get_numbuttons():
-                        if joystick.get_button(self.button_id):
-                            triggered = True
-                elif self.hat_id is not None and self.hat_value is not None:
-                    # Monitor hat/D-pad press
-                    if self.hat_id < joystick.get_numhats():
-                        current_hat = joystick.get_hat(self.hat_id)
-                        if current_hat == self.hat_value:
-                            triggered = True
-                
-                if triggered:
-                    self.shortcut_triggered.emit()
-                    # Small delay to prevent rapid firing
-                    self.msleep(200)
-                
-                clock.tick(30)  # 30 FPS for monitoring
-                
-        except Exception as e:
-            # Silently handle gamepad monitor errors
-            pass
-        finally:
-            try:
-                if pygame.get_init():
-                    pygame.quit()
-            except Exception:
-                pass
-    
-    def stop(self):
-        """Stop monitoring."""
-        self.running = False
 
 
 class OrientationVisualizationWidget(QWidget):
@@ -635,11 +463,14 @@ class CalibrationPanelQt(QGroupBox):
     `OrientationPanel` can remain focused on display-only concerns.
     """
 
-    def __init__(self, parent=None, control_queue=None, message_callback=None, padding=6):
+    def __init__(self, parent=None, control_queue=None, message_callback=None, padding=6, 
+                 input_command_queue=None, input_response_queue=None):
         super().__init__("Calibration", parent)
         
         self.control_queue = control_queue
         self.message_callback = message_callback
+        self.input_command_queue = input_command_queue
+        self.input_response_queue = input_response_queue
 
         # Drift correction controls
         self.drift_angle_yaw_value = DEFAULT_CENTER_THRESHOLD
@@ -674,16 +505,18 @@ class CalibrationPanelQt(QGroupBox):
         # Drift correction status
         self.drift_status_label = None
         
-        # Filter selection
-        self.filter_combo = None
+        # Input worker response monitoring
+        if self.input_response_queue:
+            self.input_response_timer = QTimer()
+            self.input_response_timer.timeout.connect(self._check_input_responses)
+            self.input_response_timer.start(50)  # Check every 50ms
+        else:
+            self.input_response_timer = None
         
         # Reset orientation controls
         self.reset_shortcut = "None"
         self.reset_shortcut_display_name = "None"
         self.reset_button = None
-        self._global_hotkey_registered = False
-        self._qt_shortcut = None
-        self._gamepad_monitor = None
         
         # Position offset tracking (for reset functionality)
         self._x_offset = 0.0
@@ -713,26 +546,16 @@ class CalibrationPanelQt(QGroupBox):
         controls_layout.setSpacing(4)
         controls_layout.setContentsMargins(6, 4, 6, 4)
         
-        # Filter selection (left side)
-        filter_label = QLabel("Filter:")
-        controls_layout.addWidget(filter_label)
-        
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems(['complementary', 'quaternion'])
-        self.filter_combo.setCurrentText('complementary')
-        self.filter_combo.currentTextChanged.connect(self._on_filter_change)
-        controls_layout.addWidget(self.filter_combo)
-        
-        # Add stretch to separate left and right controls
+        # Add stretch to center the remaining controls
         controls_layout.addStretch()
         
-        # Gyro calibration controls (right side)
+        # Gyro calibration controls (centered)
         self.calib_status_label = QLabel("Gyro: Not calibrated")
         self.calib_status_label.setAlignment(Qt.AlignCenter)
         self.calib_status_label.setProperty("status", "error")
         controls_layout.addWidget(self.calib_status_label)
         
-        self.recal_button = QPushButton("Recalibrate Gyro Bias")
+        self.recal_button = QPushButton("Recalibrate Yaw Drift Correction")
         self.recal_button.clicked.connect(self._on_recalibrate)
         self.recal_button.setEnabled(False)  # Start disabled until processing is active
         controls_layout.addWidget(self.recal_button)
@@ -778,86 +601,71 @@ class CalibrationPanelQt(QGroupBox):
         sliders_layout.setSpacing(8)  # Space between each slider group
         sliders_layout.setContentsMargins(6, 4, 6, 4)
         
-        # Yaw drift correction
-        yaw_group = QVBoxLayout()
-        yaw_group.setSpacing(2)  # Minimal space between label and slider
-        drift_yaw_label = QLabel("Drift Correction Angle - Yaw:")
-        drift_yaw_label.setAlignment(Qt.AlignLeft)
-        yaw_group.addWidget(drift_yaw_label)
+        # Add header label for drift correction sliders
+        drift_header_label = QLabel("Drift Correction Angles")
+        drift_header_label.setAlignment(Qt.AlignCenter)
+        drift_header_label.setStyleSheet("font-weight: bold; margin-bottom: 4px;")
+        sliders_layout.addWidget(drift_header_label)
         
-        # Create horizontal layout for slider + value in one line
-        yaw_row = QHBoxLayout()
-        yaw_row.setContentsMargins(0, 0, 0, 0)  # No margins
-        yaw_row.setSpacing(4)  # Small space between slider and value
+        # Yaw drift correction
+        yaw_layout = QHBoxLayout()
+        drift_yaw_label = QLabel("Yaw:")
+        drift_yaw_label.setMinimumWidth(40)
+        yaw_layout.addWidget(drift_yaw_label)
         
         self.drift_yaw_slider = QSlider(Qt.Horizontal)
         self.drift_yaw_slider.setMinimum(0)
         self.drift_yaw_slider.setMaximum(250)  # 0-25.0 with 0.1 precision
         self.drift_yaw_slider.setValue(int(DEFAULT_CENTER_THRESHOLD * 10))
         self.drift_yaw_slider.valueChanged.connect(self._on_drift_yaw_angle_change)
-        yaw_row.addWidget(self.drift_yaw_slider)
+        yaw_layout.addWidget(self.drift_yaw_slider, 1)  # Stretch factor 1 to fill space
         
-        self.drift_angle_yaw_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}")
+        self.drift_angle_yaw_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}°")
         self.drift_angle_yaw_label.setMinimumWidth(40)
-        self.drift_angle_yaw_label.setAlignment(Qt.AlignLeft)
-        yaw_row.addWidget(self.drift_angle_yaw_label)
+        self.drift_angle_yaw_label.setAlignment(Qt.AlignCenter)
+        yaw_layout.addWidget(self.drift_angle_yaw_label)
         
-        yaw_group.addLayout(yaw_row)
-        sliders_layout.addLayout(yaw_group)
+        sliders_layout.addLayout(yaw_layout)
         
         # Pitch drift correction
-        pitch_group = QVBoxLayout()
-        pitch_group.setSpacing(2)  # Minimal space between label and slider
-        drift_pitch_label = QLabel("Drift Correction Angle - Pitch:")
-        drift_pitch_label.setAlignment(Qt.AlignLeft)
-        pitch_group.addWidget(drift_pitch_label)
-        
-        # Create horizontal layout for slider + value in one line
-        pitch_row = QHBoxLayout()
-        pitch_row.setContentsMargins(0, 0, 0, 0)  # No margins
-        pitch_row.setSpacing(4)  # Small space between slider and value
+        pitch_layout = QHBoxLayout()
+        drift_pitch_label = QLabel("Pitch:")
+        drift_pitch_label.setMinimumWidth(40)
+        pitch_layout.addWidget(drift_pitch_label)
         
         self.drift_pitch_slider = QSlider(Qt.Horizontal)
         self.drift_pitch_slider.setMinimum(0)
         self.drift_pitch_slider.setMaximum(250)  # 0-25.0 with 0.1 precision
         self.drift_pitch_slider.setValue(int(DEFAULT_CENTER_THRESHOLD * 10))
         self.drift_pitch_slider.valueChanged.connect(self._on_drift_pitch_angle_change)
-        pitch_row.addWidget(self.drift_pitch_slider)
+        pitch_layout.addWidget(self.drift_pitch_slider, 1)  # Stretch factor 1 to fill space
         
-        self.drift_angle_pitch_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}")
+        self.drift_angle_pitch_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}°")
         self.drift_angle_pitch_label.setMinimumWidth(40)
-        self.drift_angle_pitch_label.setAlignment(Qt.AlignLeft)
-        pitch_row.addWidget(self.drift_angle_pitch_label)
+        self.drift_angle_pitch_label.setAlignment(Qt.AlignCenter)
+        pitch_layout.addWidget(self.drift_angle_pitch_label)
         
-        pitch_group.addLayout(pitch_row)
-        sliders_layout.addLayout(pitch_group)
+        sliders_layout.addLayout(pitch_layout)
         
         # Roll drift correction
-        roll_group = QVBoxLayout()
-        roll_group.setSpacing(2)  # Minimal space between label and slider
-        drift_roll_label = QLabel("Drift Correction Angle - Roll:")
-        drift_roll_label.setAlignment(Qt.AlignLeft)
-        roll_group.addWidget(drift_roll_label)
-        
-        # Create horizontal layout for slider + value in one line
-        roll_row = QHBoxLayout()
-        roll_row.setContentsMargins(0, 0, 0, 0)  # No margins
-        roll_row.setSpacing(4)  # Small space between slider and value
+        roll_layout = QHBoxLayout()
+        drift_roll_label = QLabel("Roll:")
+        drift_roll_label.setMinimumWidth(40)
+        roll_layout.addWidget(drift_roll_label)
         
         self.drift_roll_slider = QSlider(Qt.Horizontal)
         self.drift_roll_slider.setMinimum(0)
         self.drift_roll_slider.setMaximum(250)  # 0-25.0 with 0.1 precision
         self.drift_roll_slider.setValue(int(DEFAULT_CENTER_THRESHOLD * 10))
         self.drift_roll_slider.valueChanged.connect(self._on_drift_roll_angle_change)
-        roll_row.addWidget(self.drift_roll_slider)
+        roll_layout.addWidget(self.drift_roll_slider, 1)  # Stretch factor 1 to fill space
         
-        self.drift_angle_roll_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}")
+        self.drift_angle_roll_label = QLabel(f"{DEFAULT_CENTER_THRESHOLD:.1f}°")
         self.drift_angle_roll_label.setMinimumWidth(40)
-        self.drift_angle_roll_label.setAlignment(Qt.AlignLeft)
-        roll_row.addWidget(self.drift_angle_roll_label)
+        self.drift_angle_roll_label.setAlignment(Qt.AlignCenter)
+        roll_layout.addWidget(self.drift_angle_roll_label)
         
-        roll_group.addLayout(roll_row)
-        sliders_layout.addLayout(roll_group)
+        sliders_layout.addLayout(roll_layout)
         
         # Add sliders frame to horizontal layout
         sliders_viz_layout.addWidget(sliders_frame, stretch=1)
@@ -900,7 +708,7 @@ class CalibrationPanelQt(QGroupBox):
         # Quantize to 0.1 and update display immediately
         vq = round(v * 10.0) / 10.0
         self.drift_angle_yaw_value = vq
-        self.drift_angle_yaw_label.setText(f"{vq:.1f}")
+        self.drift_angle_yaw_label.setText(f"{vq:.1f}°")
         
         # Update visualization widget immediately
         if self.visualization_widget:
@@ -924,7 +732,7 @@ class CalibrationPanelQt(QGroupBox):
         # Quantize to 0.1 and update display immediately
         vq = round(v * 10.0) / 10.0
         self.drift_angle_pitch_value = vq
-        self.drift_angle_pitch_label.setText(f"{vq:.1f}")
+        self.drift_angle_pitch_label.setText(f"{vq:.1f}°")
         
         # Update visualization widget immediately
         if self.visualization_widget:
@@ -948,7 +756,7 @@ class CalibrationPanelQt(QGroupBox):
         # Quantize to 0.1 and update display immediately
         vq = round(v * 10.0) / 10.0
         self.drift_angle_roll_value = vq
-        self.drift_angle_roll_label.setText(f"{vq:.1f}")
+        self.drift_angle_roll_label.setText(f"{vq:.1f}°")
         
         # Update visualization widget immediately
         if self.visualization_widget:
@@ -973,13 +781,31 @@ class CalibrationPanelQt(QGroupBox):
 
     def _on_recalibrate(self):
         """Handle recalibrate gyro bias button click."""
-        if not safe_queue_put(self.control_queue, ('recalibrate_gyro_bias',), timeout=QUEUE_PUT_TIMEOUT):
+        # Get sample count from preferences panel if available
+        sample_count = None
+        if hasattr(self, 'preferences_panel') and self.preferences_panel:
+            try:
+                sample_count = self.preferences_panel.gyro_bias_cal_samples
+            except AttributeError:
+                # Fallback if preferences panel doesn't have the attribute
+                sample_count = None
+        
+        # Send command with or without sample count
+        if sample_count is not None:
+            command = ('recalibrate_gyro_bias', sample_count)
+        else:
+            command = ('recalibrate_gyro_bias',)
+            
+        if not safe_queue_put(self.control_queue, command, timeout=QUEUE_PUT_TIMEOUT):
             if self.message_callback:
                 self.message_callback("Failed to send recalibration request")
             return
 
         if self.message_callback:
-            self.message_callback("Gyro bias recalibration requested")
+            if sample_count is not None:
+                self.message_callback(f"Gyro bias recalibration requested ({sample_count} samples)")
+            else:
+                self.message_callback("Gyro bias recalibration requested")
     
     def _on_filter_change(self, filter_type):
         """Send filter selection change to fusion worker via control queue."""
@@ -995,70 +821,60 @@ class CalibrationPanelQt(QGroupBox):
                 QTimer.singleShot(0, lambda msg=f"Failed to set filter to: {filter_type} - {ex}": self.message_callback(msg))
     
     def _set_reset_shortcut(self, key, display_name):
-        """Set the keyboard or gamepad shortcut for reset orientation."""
-        # Clean up existing shortcuts
-        try:
-            if hasattr(self, '_shortcut_obj') and self._shortcut_obj:
-                self._shortcut_obj.setKey(QKeySequence())
-                self._shortcut_obj.deleteLater()
-                self._shortcut_obj = None
-        except Exception:
-            pass
+        """Set the keyboard or gamepad shortcut for reset orientation via input worker."""
+        # Store shortcut info
+        self.reset_shortcut = key
+        self.reset_shortcut_display_name = display_name if display_name else key
         
-        # Stop existing gamepad monitor
-        try:
-            if self._gamepad_monitor:
-                self._gamepad_monitor.stop()
-                self._gamepad_monitor.wait(1000)
-                self._gamepad_monitor = None
-        except Exception:
-            pass
-
-        try:
-            self.reset_shortcut = key
-            self.reset_shortcut_display_name = display_name if display_name else key
-            if key and key != 'None':
-                self.reset_button.setText(f"Reset Orientation ({display_name})")
-            else:
-                self.reset_button.setText("Reset Orientation")
+        # Update button text
+        if key and key != 'None':
+            self.reset_button.setText(f"Reset Orientation ({display_name})")
+        else:
+            self.reset_button.setText("Reset Orientation")
+        
+        # Register shortcut with input worker
+        if self.input_command_queue and key and key != 'None':
+            try:
+                print(f"[CalibrationPanel] Sending set_shortcut: {key} ({display_name})")
+                self.input_command_queue.put(('set_shortcut', key, display_name))
+                
+                # Only log if not during initialization to prevent startup spam
+                if not getattr(self, '_initializing', False) and self.message_callback:
+                    QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
+            except Exception as ex:
+                if self.message_callback:
+                    QTimer.singleShot(0, lambda msg=f"Failed to set shortcut: {ex}": self.message_callback(msg))
+        elif self.input_command_queue:
+            # Clear any existing shortcut
+            try:
+                print("[CalibrationPanel] Sending clear_shortcut")
+                self.input_command_queue.put(('clear_shortcut',))
+            except Exception:
+                pass
+    
+    def _check_input_responses(self):
+        """Check for responses from input worker and handle shortcut triggers."""
+        if not self.input_response_queue:
+            return
             
-            # Register appropriate input handler
-            if key and key != 'None':
-                if key.startswith('joy'):
-                    # Gamepad input
-                    try:
-                        self._gamepad_monitor = GamepadMonitorThread(key, self)
-                        self._gamepad_monitor.shortcut_triggered.connect(self._on_reset_orientation)
-                        self._gamepad_monitor.start()
-                        
-                        # Only log if not during initialization to prevent startup spam
-                        if not getattr(self, '_initializing', False) and self.message_callback:
-                            QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
-                    except Exception as ex:
-                        if self.message_callback:
-                            QTimer.singleShot(0, lambda msg=f"Failed to set gamepad shortcut: {ex}": self.message_callback(msg))
-                else:
-                    # Keyboard input
-                    try:
-                        import keyboard
-                        # Clear existing hotkey if any
-                        try:
-                            keyboard.unhook_all()
-                        except Exception:
-                            pass
-                        
-                        # Register new hotkey
-                        keyboard.on_press_key(key, lambda _: self._on_reset_orientation())
-                        
-                        # Only log if not during initialization to prevent startup spam
-                        if not getattr(self, '_initializing', False) and self.message_callback:
-                            QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
-                    except Exception as ex:
-                        if self.message_callback:
-                            QTimer.singleShot(0, lambda msg=f"Failed to set keyboard shortcut: {ex}": self.message_callback(msg))
-        except Exception as ex:
-            if self.message_callback:
-                QTimer.singleShot(0, lambda msg=f"Failed to set shortcut: {ex}": self.message_callback(msg))
+        try:
+            response = self.input_response_queue.get_nowait()
+            print(f"[CalibrationPanel] Received input response: {response}")
+            if response and len(response) >= 2:
+                response_type = response[0]
+                if response_type == 'shortcut_triggered' and len(response) >= 3:
+                    action = response[2]
+                    print(f"[CalibrationPanel] Shortcut triggered, action: {action}")
+                    if action == 'reset_orientation':
+                        print(f"[CalibrationPanel] Triggering reset orientation")
+                        self._on_reset_orientation()
+        except queue.Empty:
+            # No response available, this is normal
+            pass
+        except Exception as e:
+            print(f"[CalibrationPanel] ERROR checking input responses: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _on_reset_orientation(self):
         """Handle orientation reset button click."""
@@ -1088,6 +904,16 @@ class CalibrationPanelQt(QGroupBox):
                 QTimer.singleShot(0, lambda: self.message_callback("Position offsets updated to make current position zero"))
         except Exception:
             pass
+
+    def _on_force_trigger(self):
+        """Send a manual trigger command to the input worker for testing."""
+        if self.input_command_queue:
+            try:
+                print("[CalibrationPanel] Sending manual trigger to input worker")
+                self.input_command_queue.put(('trigger_reset',))
+            except Exception as ex:
+                if self.message_callback:
+                    QTimer.singleShot(0, lambda msg=f"Failed to send manual trigger: {ex}": self.message_callback(msg))
 
     def update_calibration_status(self, calibrated):
         """Update gyro calibration status with color changes.
@@ -1139,7 +965,6 @@ class CalibrationPanelQt(QGroupBox):
                 'drift_angle_yaw': f"{yaw_v:.1f}",
                 'drift_angle_pitch': f"{pitch_v:.1f}",
                 'drift_angle_roll': f"{roll_v:.1f}",
-                'filter': self.filter_combo.currentText() if self.filter_combo else 'complementary',
                 'reset_shortcut': self.reset_shortcut,
                 'reset_shortcut_display_name': self.reset_shortcut_display_name
             }
@@ -1148,7 +973,6 @@ class CalibrationPanelQt(QGroupBox):
                 'drift_angle_yaw': f"{DEFAULT_CENTER_THRESHOLD:.1f}",
                 'drift_angle_pitch': f"{DEFAULT_CENTER_THRESHOLD:.1f}",
                 'drift_angle_roll': f"{DEFAULT_CENTER_THRESHOLD:.1f}",
-                'filter': 'complementary',
                 'reset_shortcut': 'None',
                 'reset_shortcut_display_name': 'None'
             }
@@ -1201,19 +1025,6 @@ class CalibrationPanelQt(QGroupBox):
                 self.set_drift_angle_roll(angle)
             except Exception:
                 pass
-        
-        # Restore filter selection if saved
-        try:
-            filter_type = prefs.get('filter', 'complementary')
-            if self.filter_combo:
-                self.filter_combo.setCurrentText(filter_type)
-                # Notify fusion worker of the preference (best-effort)
-                try:
-                    self._on_filter_change(filter_type)
-                except Exception:
-                    pass
-        except Exception:
-            pass
         
         # Restore keyboard/gamepad shortcut if saved
         shortcut = prefs.get('reset_shortcut', 'None')
@@ -1289,7 +1100,7 @@ class CalibrationPanelQt(QGroupBox):
             angle = round(angle * 10.0) / 10.0
             
             self.drift_angle_yaw_value = angle
-            self.drift_angle_yaw_label.setText(f"{angle:.1f}")
+            self.drift_angle_yaw_label.setText(f"{angle:.1f}°")
             self.drift_yaw_slider.setValue(int(angle * 10))
             
             if self.control_queue:
@@ -1309,7 +1120,7 @@ class CalibrationPanelQt(QGroupBox):
             angle = round(angle * 10.0) / 10.0
             
             self.drift_angle_pitch_value = angle
-            self.drift_angle_pitch_label.setText(f"{angle:.1f}")
+            self.drift_angle_pitch_label.setText(f"{angle:.1f}°")
             self.drift_pitch_slider.setValue(int(angle * 10))
             
             if self.control_queue:
@@ -1436,14 +1247,12 @@ class CalibrationPanelQt(QGroupBox):
             status: String 'active' or 'inactive' indicating processing state
         """
         try:
-            is_active = (status == 'active')
-            self.recal_button.setEnabled(is_active)
+            self._processing_active = (status == 'active')
+            self._update_recalibrate_button_state()
             
             # Update button text and styling to reflect state
-            if is_active:
-                self.recal_button.setText("Recalibrate Gyro Bias")
-                # Remove disabled styling
-                self.recal_button.setProperty("status", "")
+            if self._processing_active:
+                self.recal_button.setText("Recalibrate Yaw Drift Correction")
                 
                 # Restore calibration status when becoming active
                 current_text = self.calib_status_label.text()
@@ -1456,9 +1265,7 @@ class CalibrationPanelQt(QGroupBox):
                 # Note: calibrating status will be set by update_calibrating_status if needed
                 self.calib_status_label.style().polish(self.calib_status_label)
             else:
-                self.recal_button.setText("Recalibrate Gyro Bias")
-                # Apply disabled styling to match serial panel
-                self.recal_button.setProperty("status", "disabled")
+                self.recal_button.setText("Recalibrate Yaw Drift Correction")
                 
                 # Update the calibration status label styling when not active
                 current_text = self.calib_status_label.text()
@@ -1470,37 +1277,82 @@ class CalibrationPanelQt(QGroupBox):
                     self.calib_status_label.setText("Gyro: Not calibrated (Disabled)")
                 self.calib_status_label.setProperty("status", "disabled")
                 self.calib_status_label.style().polish(self.calib_status_label)
-            
-            self.recal_button.style().polish(self.recal_button)
         except Exception:
             pass
     
     def clear_calibration_state(self):
         """
         Clear calibration state when serial is stopped.
-        Reset gyro bias status and disable recalibration button.
+        Reset gyro bias status and mark serial as disconnected.
         """
         try:
+            # Mark serial as disconnected
+            self._serial_connected = False
+            self._update_recalibrate_button_state()
+            
             # Reset gyro calibration status to "not calibrated" with disabled styling
             self.calib_status_label.setText("Gyro: Not calibrated")
             self.calib_status_label.setProperty("status", "disabled")
             self.calib_status_label.style().polish(self.calib_status_label)
+        except Exception:
+            pass
+    
+    def _update_recalibrate_button_state(self):
+        """
+        Update recalibrate button state based on both serial connection and processing status.
+        Button is only enabled when both serial is connected AND processing is active.
+        """
+        try:
+            should_enable = self._processing_active and self._serial_connected
+            self.recal_button.setEnabled(should_enable)
             
-            # Disable recalibration button with disabled styling
-            self.recal_button.setEnabled(False)
-            self.recal_button.setProperty("status", "disabled")
+            if should_enable:
+                # Remove disabled styling
+                self.recal_button.setProperty("status", "")
+            else:
+                # Apply disabled styling
+                self.recal_button.setProperty("status", "disabled")
+            
             self.recal_button.style().polish(self.recal_button)
         except Exception:
             pass
+    
+    def update_serial_connection_status(self, status):
+        """
+        Update serial connection status and recalibrate button state.
+        
+        Args:
+            status: String indicating serial connection state
+        """
+        try:
+            # Consider connected when status is not in the disconnected states
+            self._serial_connected = status not in ['stopped', 'disconnected', 'error', 'inactive']
+            self._update_recalibrate_button_state()
+        except Exception:
+            pass
+    
+    def connect_preferences_panel(self, preferences_panel):
+        """Connect to preferences panel to access configuration values."""
+        self.preferences_panel = preferences_panel
     
     def cleanup(self):
         """Clean up threads and resources when the panel is destroyed."""
         try:
             # Stop gamepad monitor thread if running
-            if self._gamepad_monitor:
-                self._gamepad_monitor.stop()
-                self._gamepad_monitor.wait(2000)  # Wait up to 2 seconds
-                self._gamepad_monitor = None
+            if hasattr(self, '_gamepad_monitor') and self._gamepad_monitor:
+                try:
+                    self._gamepad_monitor.stop()
+                    self._gamepad_monitor.wait(2000)  # Wait up to 2 seconds
+                except Exception:
+                    pass
+                finally:
+                    self._gamepad_monitor = None
+            # Stop response timer if running to avoid calls after widget deletion
+            if hasattr(self, 'input_response_timer') and self.input_response_timer:
+                try:
+                    self.input_response_timer.stop()
+                except Exception:
+                    pass
             
             # Clean up keyboard hooks
             try:
@@ -1510,13 +1362,6 @@ class CalibrationPanelQt(QGroupBox):
                 pass  # keyboard module not available
             except Exception:
                 pass  # Already cleaned up or other error
-            
-            # Cleanup pygame if it was initialized
-            if PYGAME_AVAILABLE:
-                try:
-                    pygame.quit()
-                except Exception:
-                    pass
                     
         except Exception as ex:
             print(f"Error during cleanup: {ex}")

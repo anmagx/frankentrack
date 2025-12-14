@@ -62,19 +62,19 @@ class OrientationPanelQt(QGroupBox):
         # Row 0: Yaw, Pitch, Roll
         euler_grid.addWidget(QLabel("Yaw:"), 0, 0)
         self.yaw_value_label = QLabel("0.0")
-        self.yaw_value_label.setMinimumWidth(60)
+        self.yaw_value_label.setMinimumWidth(50)
         self.yaw_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         euler_grid.addWidget(self.yaw_value_label, 0, 1)
         
         euler_grid.addWidget(QLabel("Pitch:"), 0, 2)
         self.pitch_value_label = QLabel("0.0")
-        self.pitch_value_label.setMinimumWidth(60)
+        self.pitch_value_label.setMinimumWidth(50)
         self.pitch_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         euler_grid.addWidget(self.pitch_value_label, 0, 3)
         
         euler_grid.addWidget(QLabel("Roll:"), 0, 4)
         self.roll_value_label = QLabel("0.0")
-        self.roll_value_label.setMinimumWidth(60)
+        self.roll_value_label.setMinimumWidth(50)
         self.roll_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         euler_grid.addWidget(self.roll_value_label, 0, 5)
         
@@ -90,19 +90,19 @@ class OrientationPanelQt(QGroupBox):
         # Row 0: X, Y, Z positions
         position_grid.addWidget(QLabel("X:"), 0, 0)
         self.x_value_label = QLabel("0.00")
-        self.x_value_label.setMinimumWidth(60)
+        self.x_value_label.setMinimumWidth(50)
         self.x_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         position_grid.addWidget(self.x_value_label, 0, 1)
         
         position_grid.addWidget(QLabel("Y:"), 0, 2)
         self.y_value_label = QLabel("0.00")
-        self.y_value_label.setMinimumWidth(60)
+        self.y_value_label.setMinimumWidth(50)
         self.y_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         position_grid.addWidget(self.y_value_label, 0, 3)
         
         position_grid.addWidget(QLabel("Z:"), 0, 4)
         self.z_value_label = QLabel("0.00")
-        self.z_value_label.setMinimumWidth(60)
+        self.z_value_label.setMinimumWidth(50)
         self.z_value_label.setAlignment(Qt.AlignCenter)  # Center the value
         position_grid.addWidget(self.z_value_label, 0, 5)
         

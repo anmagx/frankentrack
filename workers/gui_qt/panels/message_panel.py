@@ -138,6 +138,10 @@ class MessagePanelQt(QFrame):
         if not self._serial_buffer:
             return
         
+        # Skip expensive updates if widget is not visible
+        if not self.isVisible():
+            return
+        
         try:
             # Clear and update content (same as tkinter logic)
             self.serial_text.clear()
@@ -160,6 +164,10 @@ class MessagePanelQt(QFrame):
         the display with batched updates for efficiency.
         """
         if not self._message_buffer:
+            return
+        
+        # Skip expensive updates if widget is not visible
+        if not self.isVisible():
             return
         
         try:

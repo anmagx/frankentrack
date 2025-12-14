@@ -16,7 +16,7 @@ GyroData gyroData;
 void setup() {
   Wire.begin();
   Wire.setClock(400000); //400khz clock
-  Serial.begin(250000);
+  Serial.begin(500000);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);  // LED on
   while (!Serial) {
@@ -50,6 +50,7 @@ void setup() {
   Serial.print(calib.gyroBias[1]);
   Serial.print(", ");
   Serial.println(calib.gyroBias[2]);
+
   delay(1000);
   IMU.init(calib, IMU_ADDRESS);
 #endif
@@ -69,27 +70,27 @@ void setup() {
 void loop() {
   static unsigned long startTime = millis();
   float timeSec = (millis() - startTime) / 1000.0;
+static unsigned long lastUpdate = 0;
+  const unsigned long UPDATE_INTERVAL = 4; // 4ms = 250Hz target (adjust as needed)
+  
+  // Only update at consistent intervals
+  if (millis() - lastUpdate >= UPDATE_INTERVAL) {
+    lastUpdate = millis();
+    
+    float timeSec = (millis() - startTime) / 1000.0;
 
-  IMU.update();
-  Serial.print(timeSec, 6);
-  Serial.print(",");
+    IMU.update();
+    IMU.getAccel(&accelData);
+    IMU.getGyro(&gyroData);
 
-  IMU.getAccel(&accelData);
-  Serial.print(accelData.accelX, 6);
-  Serial.print(",");
-  Serial.print(accelData.accelY, 6);
-  Serial.print(",");
-  Serial.print(accelData.accelZ, 6);
-  Serial.print(",");
-
-  IMU.getGyro(&gyroData);
-  Serial.print(gyroData.gyroX, 6);
-  Serial.print(",");
-  Serial.print(gyroData.gyroY, 6);
-  Serial.print(",");
-  Serial.print(gyroData.gyroZ, 6);
-
-  Serial.println();
-
-  delay(2); //~120hz
+    // Use String concatenation - Arduino compatible and faster than multiple prints
+    String output = String(timeSec, 4) + "," + 
+                    String(accelData.accelX, 4) + "," +
+                    String(accelData.accelY, 4) + "," +
+                    String(accelData.accelZ, 4) + "," +
+                    String(gyroData.gyroX, 4) + "," +
+                    String(gyroData.gyroY, 4) + "," +
+                    String(gyroData.gyroZ, 4);
+    Serial.println(output);
+  }
 }

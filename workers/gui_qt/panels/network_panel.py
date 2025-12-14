@@ -123,6 +123,10 @@ class NetworkPanelQt(BasePanelQt):
         self._udp_btn_text = "Stop UDP"
         self.udp_toggle_btn.setText(self._udp_btn_text)
         
+        # Disable IP and port inputs while UDP is active
+        self.udp_ip_entry.setEnabled(False)
+        self.udp_port_entry.setEnabled(False)
+        
         # Get current IP and port
         try:
             ip = str(self.udp_ip_entry.text())
@@ -162,6 +166,10 @@ class NetworkPanelQt(BasePanelQt):
         # Update button text
         self._udp_btn_text = "Start UDP"
         self.udp_toggle_btn.setText(self._udp_btn_text)
+        
+        # Re-enable IP and port inputs when UDP is stopped
+        self.udp_ip_entry.setEnabled(True)
+        self.udp_port_entry.setEnabled(True)
         
         # Send disable command (identical to tkinter)
         if not safe_queue_put(

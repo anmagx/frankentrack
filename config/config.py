@@ -17,7 +17,7 @@ APP_VERSION = "0.13-alpha"
 # GUI Timing and Updates  
 # ============================================================================
 GUI_UPDATE_INTERVAL_MS = 16          # How often GUI updates displays (milliseconds) - ~60 FPS for real-time
-WORKER_QUEUE_CHECK_INTERVAL_MS = 50   # How often GUI checks queues (milliseconds) - balanced for responsiveness
+WORKER_QUEUE_CHECK_INTERVAL_MS = 25   # How often GUI checks queues (milliseconds) - balanced for responsiveness
 
 # Worker timing constants
 FUSION_LOOP_SLEEP_MS = 1    # Minimal sleep in fusion loop (was hardcoded)
@@ -86,6 +86,11 @@ STATIONARY_GYRO_THRESHOLD = 5.0
 # declaring the device stationary (prevents jitter/false positives)
 STATIONARY_DEBOUNCE_S = 0.15
 
+# Gradual drift correction constants
+DRIFT_TRANSITION_CURVE = "cosine"    # Transition curve type for smooth drift correction ("cosine", "linear", "quadratic")
+DRIFT_UI_THRESHOLD = 0.1             # Minimum drift strength to show UI indicator (0.0-1.0)
+DRIFT_SMOOTHING_TIME = 2.0           # Time constant for smooth drift correction (seconds) - used by both filter types
+
 # ============================================================================
 # Gyro bias calibration
 # ============================================================================
@@ -100,6 +105,11 @@ GYRO_BIAS_CAL_SAMPLES = 400
 # ============================================================================
 DEFAULT_UDP_IP = '127.0.0.1'
 DEFAULT_UDP_PORT = 4243
+
+# UDP output rate limiting
+DEFAULT_OUTPUT_RATE_HZ = 120
+OUTPUT_RATE_MIN_HZ = 10
+OUTPUT_RATE_MAX_HZ = 250
 
 # ============================================================================
 # GUI / Display

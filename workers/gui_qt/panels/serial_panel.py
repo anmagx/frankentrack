@@ -8,7 +8,7 @@ and start/stop functionality.
 
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QPushButton, 
                              QFrame, QGridLayout, QSizePolicy)
-from PyQt5.QtCore import pyqtSignal, QTimer
+from PyQt5.QtCore import pyqtSignal, QTimer, Qt
 from PyQt5.QtGui import QFont
 
 from .base_panel import BasePanelQt
@@ -83,7 +83,7 @@ class SerialPanelQt(BasePanelQt):
         layout.addWidget(baud_label, 0, 2)
         
         self.baud_combo = QComboBox()
-        baud_rates = ["9600", "19200", "38400", "57600", "115200", "230400", "250000"]
+        baud_rates = ["9600", "19200", "38400", "57600", "115200", "230400", "250000", "500000", "1000000"]
         self.baud_combo.addItems(baud_rates)
         self.baud_combo.setCurrentText(self._baud_value)
         self.baud_combo.setMaximumWidth(90)  # Increased to accommodate all baud rates
@@ -142,6 +142,11 @@ class SerialPanelQt(BasePanelQt):
         self._is_running = True
         self._connection_status = "starting"
         self.toggle_button.setText("Stop")
+        
+        # Disable port and baud selection while connection is active
+        self.port_combo.setEnabled(False)
+        self.baud_combo.setEnabled(False)
+        
         self.status_label.setText(f"Starting {port} @ {baud}...")
         self.status_label.setProperty("status", "warning")
         self.status_label.style().polish(self.status_label)
@@ -162,6 +167,11 @@ class SerialPanelQt(BasePanelQt):
         self._is_running = False
         self._connection_status = "stopped"
         self.toggle_button.setText("Start")
+        
+        # Re-enable port and baud selection when stopped
+        self.port_combo.setEnabled(True)
+        self.baud_combo.setEnabled(True)
+        
         self.status_label.setText("Stopped")
         self.status_label.setProperty("status", "disabled")
         self.status_label.style().polish(self.status_label)
@@ -227,6 +237,10 @@ class SerialPanelQt(BasePanelQt):
             self.status_label.setProperty("status", "warning")  # Orange until fusion is active
             self.status_label.style().polish(self.status_label)
         elif status == "error":
+            # Re-enable port and baud selection on error so user can try different settings
+            self.port_combo.setEnabled(True)
+            self.baud_combo.setEnabled(True)
+            
             self.status_label.setText(f"Error on {port} @ {baud}")
             self.status_label.setProperty("status", "error")
             self.status_label.style().polish(self.status_label)

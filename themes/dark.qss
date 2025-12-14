@@ -44,6 +44,18 @@ QPushButton:pressed {
     background-color: #444444;
 }
 
+QPushButton:disabled {
+    background-color: #3a3a3a;
+    border: 1px solid #555555;
+    color: #888888;
+}
+
+QPushButton[status="disabled"] {
+    background-color: #3a3a3a;
+    border: 1px solid #555555;
+    color: #888888;
+}
+
 /* Labels */
 QLabel {
     color: #ffffff;
@@ -78,6 +90,12 @@ QComboBox {
 
 QComboBox:hover {
     background-color: #4a4a4a;
+}
+
+QComboBox:disabled {
+    background-color: #2a2a2a;
+    border: 1px solid #444444;
+    color: #666666;
 }
 
 QComboBox QAbstractItemView {
@@ -118,6 +136,12 @@ QLineEdit:focus {
 
 QLineEdit:hover {
     background-color: #4a4a4a;
+}
+
+QLineEdit:disabled {
+    background-color: #2a2a2a;
+    border: 1px solid #444444;
+    color: #666666;
 }
 
 /* Status bar */

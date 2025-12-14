@@ -23,7 +23,9 @@ from config.config import (
      QUEUE_PUT_TIMEOUT,
      QUEUE_HIGH_WATERMARK,
      QUEUE_CRITICAL_WATERMARK,
-     FUSION_LOOP_SLEEP_MS
+     FUSION_LOOP_SLEEP_MS,
+     DRIFT_SMOOTHING_TIME,
+     DRIFT_TRANSITION_CURVE
 )
 from util.error_utils import (
     safe_queue_put,
@@ -31,226 +33,6 @@ from util.error_utils import (
     parse_imu_line,
     normalize_angle
 )
-
-
-class ComplementaryFilter:
-    """Complementary filter for orientation estimation using gyro and accel."""
-    
-    def __init__(self, accel_threshold=ACCEL_THRESHOLD, center_threshold=DEFAULT_CENTER_THRESHOLD, center_threshold_yaw=None, center_threshold_pitch=None, center_threshold_roll=None, logQueue=None):
-        """
-        Initialize the complementary filter.
-        
-        Args:
-            accel_threshold: Only apply drift correction when total accel is within
-                           this threshold of 1g (e.g., 0.15 means 0.85-1.15g).
-                           This prevents correction during movement.
-            center_threshold: Default threshold for all axes (backward compatibility)
-            center_threshold_yaw: Yaw-specific threshold (overrides center_threshold if provided)
-            center_threshold_pitch: Pitch-specific threshold (overrides center_threshold if provided)
-            center_threshold_roll: Roll-specific threshold (overrides center_threshold if provided)
-        """
-        # Gyro weight for complementary filter on roll/pitch (0..1).
-        # Values <1 allow accelerometer to gently correct long-term drift.
-        self.alpha_roll = ALPHA_ROLL  # From config
-        self.alpha_pitch = ALPHA_PITCH  # From config
-        self.alpha_yaw = ALPHA_YAW  # From config
-        self.alpha_drift = ALPHA_DRIFT_CORRECTION  # From config
-        self.accel_threshold = accel_threshold
-        
-        # Use separate thresholds if provided, otherwise use default for all
-        self.center_threshold_yaw = center_threshold_yaw if center_threshold_yaw is not None else center_threshold
-        self.center_threshold_pitch = center_threshold_pitch if center_threshold_pitch is not None else center_threshold
-        self.center_threshold_roll = center_threshold_roll if center_threshold_roll is not None else center_threshold
-        
-        # Keep backward compatibility
-        self.center_threshold = center_threshold
-        # Gyro bias for yaw (deg/s). This is set at startup by calibration
-        # (if enabled) and is applied as a static correction during runtime.
-        self.gyro_bias_yaw = 0.0
-        # Whether a gyro yaw bias has been calibrated/applied
-        self.gyro_calibrated = False
-        # Stationary detection debounce state
-        self._stationary_start = None
-        self._last_stationary = False
-        self._gyro_stationary_threshold = STATIONARY_GYRO_THRESHOLD
-        self._stationary_debounce_s = STATIONARY_DEBOUNCE_S
-        self.roll = 0.0
-        self.pitch = 0.0
-        self.yaw = 0.0
-        self.last_time = None
-        self.logQueue = logQueue
-        
-        # Performance optimizations: pre-allocate result arrays and cache calculations
-        self._result_tuple = [0.0, 0.0, 0.0, False, False]  # Reuse to avoid allocations
-        self._cached_accel_mag = 0.0
-        self._cached_gyro_mag = 0.0
-        
-    def update(self, gyro, accel, timestamp):
-        """
-        Update orientation estimate.
-        
-        Args:
-            gyro: (gx, gy, gz) in deg/s
-            accel: (ax, ay, az) in g
-            timestamp: current time in seconds
-        
-        Returns:
-            (yaw, pitch, roll) in degrees
-        """
-        if self.last_time is None:
-            # First call: establish a time baseline and return a zeroed
-            # orientation so the system starts centered at 0,0,0.
-            # Log that we're initializing timing baseline (useful after reset)
-            try:
-                from util.log_utils import log_info
-                log_info(self.logQueue, "Fusion", f"Initializing timing baseline at {timestamp}")
-            except Exception:
-                pass
-            try:
-                print(f"[Fusion] Initializing timing baseline at {timestamp}")
-            except Exception:
-                pass
-            self.last_time = timestamp
-            self.roll = 0.0
-            self.pitch = 0.0
-            self.yaw = 0.0
-            # Return consistent 5-tuple: (yaw, pitch, roll, drift_active, is_stationary)
-            return self.yaw, self.pitch, self.roll, False, False
-        
-        # Calculate dt
-        dt = timestamp - self.last_time
-        
-        # Validate dt before updating time baseline
-        if dt <= 0:
-            # Negative or zero dt - likely duplicate or time reset, skip update
-            return self.yaw, self.pitch, self.roll, False, False
-
-        if dt < DT_MIN:
-            # Too small, likely duplicate timestamp
-            return self.yaw, self.pitch, self.roll, False, False
-
-        if dt > DT_MAX:
-            # Gap too large - reset time baseline without updating orientation
-            from util.log_utils import log_warning
-            log_warning(self.logQueue, "Fusion", f"Large dt: {dt:.3f}s, resetting baseline")
-            self.last_time = timestamp
-            return self.yaw, self.pitch, self.roll, False, False
-        
-        # Valid dt - update baseline
-        self.last_time = timestamp
-        
-        gx, gy, gz = gyro
-        
-        # Apply gyro bias correction for yaw before integration
-        gz_corr = gz - self.gyro_bias_yaw
-
-        # Gyro integration (primary method)
-        gyro_roll = self.roll + gx * dt
-        gyro_pitch = self.pitch + gy * dt
-        gyro_yaw = self.yaw + gz_corr * dt
-        
-        # Check if accelerometer is measuring primarily gravity (sensor is quiet)
-        ax, ay, az = accel
-        # Cache magnitude calculation to avoid recomputation
-        self._cached_accel_mag = np.sqrt(ax*ax + ay*ay + az*az)
-
-        # Compute instantaneous gyro magnitude (deg/s) - cache for stationary detection
-        self._cached_gyro_mag = np.sqrt(gx*gx + gy*gy + gz*gz)
-
-        # Instantaneous candidate for stationary: accel near 1g AND gyro magnitude small
-        accel_ok = False
-        if self._cached_accel_mag >= 0.01:
-            accel_ok = abs(self._cached_accel_mag - 1.0) < self.accel_threshold
-
-        candidate_stationary = accel_ok and (self._cached_gyro_mag < self._gyro_stationary_threshold)
-
-        # Debounce stationary detection: require candidate to persist for configured time
-        if candidate_stationary:
-            if self._stationary_start is None:
-                self._stationary_start = timestamp
-            # Only mark stationary once persisted
-            is_stationary = (timestamp - self._stationary_start) >= self._stationary_debounce_s
-        else:
-            # Reset debounce
-            self._stationary_start = None
-            is_stationary = False
-        
-        # Check if we're looking approximately straight ahead (all axes near center)
-        def _angle_diff_fast(a, b):
-            """Optimized smallest angle difference using modulo (O(1) vs O(n))."""
-            diff = (a - b + 180.0) % 360.0 - 180.0
-            return abs(diff)
-        
-        is_near_center = (_angle_diff_fast(self.yaw, 0) < self.center_threshold_yaw and 
-                         _angle_diff_fast(self.pitch, 0) < self.center_threshold_pitch and
-                         _angle_diff_fast(self.roll, 0) < self.center_threshold_roll)
-        
-        # Apply drift correction to all axes when stationary and near center
-        drift_correction_active = False
-        if is_stationary and is_near_center:
-            # When looking straight ahead and stationary, use alpha for gentle drift correction
-            # This allows angles to slowly return to 0
-            self.roll = self.alpha_drift * gyro_roll + (1.0 - self.alpha_drift) * 0.0
-            self.pitch = self.alpha_drift * gyro_pitch + (1.0 - self.alpha_drift) * 0.0
-            self.yaw = self.alpha_yaw * gyro_yaw + (1.0 - self.alpha_yaw) * 0.0
-            drift_correction_active = True
-        else:
-            # Fuse gyro + accel for roll/pitch when accelerometer reliably measures gravity
-            accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
-
-            # Consider accelerometer valid when magnitude is close to 1g (use cached value)
-            accel_valid = self._cached_accel_mag >= 0.01 and abs(self._cached_accel_mag - 1.0) < self.accel_threshold
-
-            if accel_valid:
-                # Blend gyro integration with accel-derived angles for roll/pitch
-                self.roll = self.alpha_roll * gyro_roll + (1.0 - self.alpha_roll) * accel_roll
-                self.pitch = self.alpha_pitch * gyro_pitch + (1.0 - self.alpha_pitch) * accel_pitch
-            else:
-                # Fall back to pure gyro integration when accel data isn't reliable
-                self.roll = gyro_roll
-                self.pitch = gyro_pitch
-
-            # Yaw remains pure gyro (no magnetometer present)
-            self.yaw = gyro_yaw
-
-            # Note: live (online) bias estimation removed — bias is set at startup
-            # during calibration (if enabled) and remains static during runtime.
-        
-        # Normalize angles to [-180, 180]
-        self.yaw = normalize_angle(self.yaw)
-        self.pitch = normalize_angle(self.pitch)
-        self.roll = normalize_angle(self.roll)
-        
-        # Reuse result array to avoid memory allocations in hot path
-        self._result_tuple[0] = self.yaw
-        self._result_tuple[1] = self.pitch  
-        self._result_tuple[2] = self.roll
-        self._result_tuple[3] = drift_correction_active
-        self._result_tuple[4] = is_stationary
-        return tuple(self._result_tuple)  # Return tuple for compatibility
-
-    def _accel_to_rp(self, accel):
-        """
-        Calculate roll and pitch from accelerometer (assumes gravity-only).
-        
-        Args:
-            accel: (ax, ay, az) in g
-            
-        Returns:
-            (roll, pitch) in degrees
-        """
-        ax, ay, az = accel
-        # Roll: rotation around X axis
-        roll = np.arctan2(ay, az) * 180.0 / np.pi
-        # Pitch: rotation around Y axis
-        pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2)) * 180.0 / np.pi
-        return roll, pitch
-
-    def reset(self):
-        """Reset orientation to zero."""
-        self.roll = 0.0
-        self.pitch = 0.0
-        self.yaw = 0.0
 
 
 class QuaternionComplementaryFilter:
@@ -266,6 +48,8 @@ class QuaternionComplementaryFilter:
         self.alpha_pitch = ALPHA_PITCH
         self.alpha_yaw = ALPHA_YAW
         self.alpha_drift = ALPHA_DRIFT_CORRECTION
+        self.drift_smoothing_time = DRIFT_SMOOTHING_TIME
+        self.drift_curve_type = DRIFT_TRANSITION_CURVE  # Load from config
         self.accel_threshold = accel_threshold
         
         # Use separate thresholds if provided, otherwise use default for all
@@ -279,6 +63,7 @@ class QuaternionComplementaryFilter:
         self.gyro_calibrated = False
         self._stationary_start = None
         self._last_stationary = False
+        self._drift_correction_start = None
         self._gyro_stationary_threshold = STATIONARY_GYRO_THRESHOLD
         self._stationary_debounce_s = STATIONARY_DEBOUNCE_S
         # Quaternion as [w, x, y, z]
@@ -339,9 +124,111 @@ class QuaternionComplementaryFilter:
         z = cr * cp * sy - sr * sp * cy
         return np.array([w, x, y, z], dtype=float)
 
+    def _slerp(self, a, b, t):
+        """Spherical linear interpolation between quaternions for smoother drift correction.
+        
+        Provides much smoother interpolation than NLERP, especially for small corrections.
+        """
+        # Ensure we take the shorter path by checking dot product
+        dot = np.dot(a, b)
+        if dot < 0.0:
+            b = -b  # Flip to shorter path
+            dot = -dot
+        
+        # If quaternions are very close, use linear interpolation to avoid division by zero
+        if dot > 0.9995:
+            q = (1.0 - t) * a + t * b
+            return self._quat_normalize(q)
+        
+        # Calculate angle between quaternions
+        theta = np.arccos(np.clip(dot, -1.0, 1.0))
+        sin_theta = np.sin(theta)
+        
+        # Spherical interpolation
+        q = (np.sin((1.0 - t) * theta) / sin_theta) * a + (np.sin(t * theta) / sin_theta) * b
+        return self._quat_normalize(q)
+
     def _nlerp(self, a, b, t):
+        """Normalized linear interpolation between quaternions.
+        
+        Handles the case where quaternions represent the same rotation
+        but have opposite signs (q and -q represent the same rotation).
+        """
+        # Ensure we take the shorter path by checking dot product
+        dot = np.dot(a, b)
+        if dot < 0.0:
+            b = -b  # Flip to shorter path
+        
+        # Linear interpolation
         q = (1.0 - t) * a + t * b
         return self._quat_normalize(q)
+
+    def _calculate_drift_factor(self, dt, elapsed_time):
+        """Calculate drift correction factor based on curve type.
+        
+        Args:
+            dt: Time delta for this update
+            elapsed_time: Total time since drift correction started
+            
+        Returns:
+            float: Correction factor between 0.0 and 1.0 for this frame
+        """
+        # Calculate progress through the smoothing period
+        time_progress = min(elapsed_time / self.drift_smoothing_time, 1.0)
+        
+        if self.drift_curve_type == 'exponential':
+            # Exponential approach - fast start, slow finish
+            # Use cumulative approach for consistency
+            target_progress = 1.0 - np.exp(-elapsed_time / self.drift_smoothing_time)
+            if elapsed_time > dt:
+                prev_progress = 1.0 - np.exp(-(elapsed_time - dt) / self.drift_smoothing_time)
+                factor = min(target_progress - prev_progress, 0.4)
+            else:
+                factor = min(target_progress, 0.4)
+        elif self.drift_curve_type == 'linear':
+            # Linear progress - constant rate
+            rate_per_second = 1.0 / self.drift_smoothing_time
+            factor = min(rate_per_second * dt, 0.1)
+        elif self.drift_curve_type == 'cosine':
+            # Cosine ease-in-out - smooth start and finish
+            target_progress = 0.5 * (1.0 - np.cos(np.pi * time_progress))
+            if elapsed_time > dt:
+                prev_time_progress = min((elapsed_time - dt) / self.drift_smoothing_time, 1.0)
+                prev_progress = 0.5 * (1.0 - np.cos(np.pi * prev_time_progress))
+                factor = min(target_progress - prev_progress, 0.4)
+            else:
+                factor = min(target_progress, 0.4)
+        elif self.drift_curve_type == 'quadratic':
+            # Quadratic ease-in - slow start, fast finish
+            target_progress = time_progress * time_progress
+            if elapsed_time > dt:
+                prev_time_progress = min((elapsed_time - dt) / self.drift_smoothing_time, 1.0)
+                prev_progress = prev_time_progress * prev_time_progress
+                factor = min(target_progress - prev_progress, 0.4)
+            else:
+                factor = min(target_progress, 0.4)
+        else:
+            # Fallback to exponential
+            target_progress = 1.0 - np.exp(-elapsed_time / self.drift_smoothing_time)
+            if elapsed_time > dt:
+                prev_progress = 1.0 - np.exp(-(elapsed_time - dt) / self.drift_smoothing_time)
+                factor = min(target_progress - prev_progress, 0.4)
+            else:
+                factor = min(target_progress, 0.4)
+        
+        # Apply smoothness damping to reduce jitter
+        # Scale factor based on angle magnitude - smaller corrections for smaller angles
+        if elapsed_time < self.drift_smoothing_time:
+            angle_magnitude = max(abs(getattr(self, '_last_yaw', 0)), 
+                                abs(getattr(self, '_last_pitch', 0)), 
+                                abs(getattr(self, '_last_roll', 0)))
+            # Reduce factor for smaller angles to make correction even gentler
+            if angle_magnitude < 2.0:  # Very close to center
+                factor *= 0.5
+            elif angle_magnitude < 1.0:  # Extremely close
+                factor *= 0.3
+        
+        return factor
 
     def _accel_to_rp(self, accel):
         ax, ay, az = accel
@@ -410,34 +297,73 @@ class QuaternionComplementaryFilter:
             self._stationary_start = None
             is_stationary = False
 
-        # If stationary+near center use drift correction similar to Euler filter
-        yaw_est, pitch_est, roll_est = self._euler_from_quat(q)
-        def _angle_diff(a, b):
-            diff = (a - b + 180) % 360 - 180
+        # Helper function for angle differences
+        def _angle_diff_fast(a, b):
+            """Optimized smallest angle difference using modulo (O(1) vs O(n))."""
+            diff = (a - b + 180.0) % 360.0 - 180.0
             return abs(diff)
-        is_near_center = (_angle_diff(yaw_est, 0) < self.center_threshold_yaw and
-                          _angle_diff(pitch_est, 0) < self.center_threshold_pitch and
-                          _angle_diff(roll_est, 0) < self.center_threshold_roll)
-
+        
+        # Apply normal accelerometer blending first (when not in drift correction)
+        if accel_ok:
+            accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
+            
+            # Get current orientation from gyro-integrated quaternion
+            current_yaw, gyro_pitch, gyro_roll = self._euler_from_quat(q)
+            
+            # Blend roll and pitch separately using their respective alpha values
+            # Higher alpha = more gyro, lower alpha = more accel
+            blended_roll = self.alpha_roll * gyro_roll + (1.0 - self.alpha_roll) * accel_roll
+            blended_pitch = self.alpha_pitch * gyro_pitch + (1.0 - self.alpha_pitch) * accel_pitch
+            
+            # Yaw stays from gyro integration (no magnetometer available)
+            # Convert back to quaternion with blended roll/pitch and gyro yaw
+            q = self._quat_from_euler(current_yaw, blended_pitch, blended_roll)
+        
+        # Check if we're looking approximately straight ahead AFTER accel correction
+        # Require ALL axes to be within their respective drift correction thresholds
+        yaw_est, pitch_est, roll_est = self._euler_from_quat(q)
+        is_near_center = (_angle_diff_fast(yaw_est, 0) < self.center_threshold_yaw and 
+                         _angle_diff_fast(pitch_est, 0) < self.center_threshold_pitch and
+                         _angle_diff_fast(roll_est, 0) < self.center_threshold_roll)
+        
+        # Apply drift correction when stationary and near center
         drift_active = False
         if is_stationary and is_near_center:
-            # Pull quaternion towards zero roll/pitch slowly
+            # Track drift correction start time
+            if self._drift_correction_start is None:
+                self._drift_correction_start = timestamp
+            
+            elapsed_time = timestamp - self._drift_correction_start
+            # Smooth drift correction using configurable curve type
+            smoothing_factor = self._calculate_drift_factor(dt, elapsed_time)
+            
+            # Pull quaternion towards zero rotation smoothly over time
             target_q = self._quat_from_euler(0.0, 0.0, 0.0)
-            q = self._nlerp(q, target_q, 1.0 - self.alpha_drift)
+            # Apply time-based smooth correction with selected curve using SLERP
+            q = self._slerp(q, target_q, smoothing_factor)
             drift_active = True
+            
+            # For final convergence: if very close to zero and correction has been active long enough,
+            # apply gentle correction to eliminate floating point precision issues
+            if elapsed_time > self.drift_smoothing_time * 0.75:  # 75% through smoothing time
+                final_yaw, final_pitch, final_roll = self._euler_from_quat(q)
+                max_angle = max(abs(final_yaw), abs(final_pitch), abs(final_roll))
+                if max_angle < 0.8:  # Tighter threshold for final convergence
+                    # Apply gentle direct correction for final convergence
+                    final_factor = min(0.2, dt * 3.0)  # Much gentler final correction
+                    q = self._slerp(q, target_q, final_factor)  # Use SLERP for smoother final convergence
         else:
-            if accel_ok:
-                accel_roll, accel_pitch = self._accel_to_rp((ax, ay, az))
-                # Build target quaternion that retains current yaw but uses accel roll/pitch
-                current_yaw, _, _ = self._euler_from_quat(q)
-                target_q = self._quat_from_euler(current_yaw, accel_pitch, accel_roll)
-                # Blend between gyro-integrated quaternion and accel-derived quaternion
-                q = self._nlerp(q, target_q, 1.0 - self.alpha_roll)
+            # Reset drift correction timer when not correcting
+            self._drift_correction_start = None
 
         q = self._quat_normalize(q)
         self.q = q
 
         yaw, pitch, roll = self._euler_from_quat(q)
+        # Store angles for next frame's smoothness calculation
+        self._last_yaw = yaw
+        self._last_pitch = pitch
+        self._last_roll = roll
         # normalize angles
         yaw = normalize_angle(yaw)
         pitch = normalize_angle(pitch)
@@ -448,6 +374,7 @@ class QuaternionComplementaryFilter:
     def reset(self):
         """Reset quaternion orientation to identity (zero rotation)."""
         self.q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        self._drift_correction_start = None
     
     
 
@@ -461,21 +388,14 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     log_info(logQueue, "Fusion Worker", "Starting complementary filter")
     print("[Fusion Worker] Starting complementary filter...")
     
-    # Initialize filter with defaults from config. The GUI can update
-    # `filter.center_threshold` at runtime via the controlQueue ('set_center_threshold').
-    # Support two filter implementations: 'complementary' (Euler-based) and 'quaternion'.
-    def _create_filter(name):
-        if name == 'quaternion':
-            return QuaternionComplementaryFilter(accel_threshold=ACCEL_THRESHOLD,
-                                                 center_threshold=DEFAULT_CENTER_THRESHOLD,
-                                                 logQueue=logQueue)
-        else:
-            return ComplementaryFilter(accel_threshold=ACCEL_THRESHOLD,
-                                       center_threshold=DEFAULT_CENTER_THRESHOLD,
-                                       logQueue=logQueue)
+    # Initialize quaternion filter with defaults from config. The GUI can update
+    # filter parameters at runtime via the controlQueue.
+    def _create_filter():
+        return QuaternionComplementaryFilter(accel_threshold=ACCEL_THRESHOLD,
+                                            center_threshold=DEFAULT_CENTER_THRESHOLD,
+                                            logQueue=logQueue)
 
-    filter_type = 'complementary'
-    filter = _create_filter(filter_type)
+    filter = _create_filter()
     # Startup calibration disabled: calibration must be triggered manually
     # by the GUI (recalibrate_gyro_bias). Inform GUI of current calibration
     # state (not calibrated) so the UI can reflect it.
@@ -493,6 +413,10 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
     # Track processing state to avoid spam
     processing_active = False
     
+    # Track data flow timeout
+    last_data_time = None
+    data_timeout = 2.0  # Send inactive after 2 seconds without data
+    
     # Track status values to only send updates when they change
     last_drift_active = None
     last_stationary = None
@@ -502,64 +426,7 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             # Check for control commands (non-blocking)
             cmd = safe_queue_get(controlQueue, timeout=0.0, default=None)
             if cmd is not None:
-                # Allow switching filter implementation at runtime
-                if (isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_filter') or (isinstance(cmd, str) and cmd.startswith('set_filter')):
-                    try:
-                        # Accept ('set_filter', 'quaternion') or ('set_filter', 'complementary')
-                        if isinstance(cmd, (list, tuple)):
-                            new_type = str(cmd[1])
-                        else:
-                            # string form: 'set_filter:quaternion' not expected but support gracefully
-                            parts = cmd.split(':', 1)
-                            new_type = parts[1] if len(parts) > 1 else 'complementary'
-
-                        new_type = new_type.lower()
-                        if new_type not in ('quaternion', 'complementary'):
-                            new_type = 'complementary'
-
-                        if new_type != filter_type:
-                            old_bias = getattr(filter, 'gyro_bias_yaw', 0.0)
-                            old_cal = getattr(filter, 'gyro_calibrated', False)
-                            old_thresh_yaw = getattr(filter, 'center_threshold_yaw', DEFAULT_CENTER_THRESHOLD)
-                            old_thresh_pitch = getattr(filter, 'center_threshold_pitch', DEFAULT_CENTER_THRESHOLD)
-                            old_thresh_roll = getattr(filter, 'center_threshold_roll', DEFAULT_CENTER_THRESHOLD)
-                            
-                            filter = _create_filter(new_type)
-                            
-                            # preserve bias/calibrated flag and separate thresholds where applicable
-                            try:
-                                filter.gyro_bias_yaw = float(old_bias)
-                            except Exception:
-                                pass
-                            try:
-                                filter.gyro_calibrated = bool(old_cal)
-                            except Exception:
-                                pass
-                            try:
-                                filter.center_threshold_yaw = float(old_thresh_yaw)
-                            except Exception:
-                                pass
-                            try:
-                                filter.center_threshold_pitch = float(old_thresh_pitch)
-                            except Exception:
-                                pass
-                            try:
-                                filter.center_threshold_roll = float(old_thresh_roll)
-                            except Exception:
-                                pass
-                            # reset timing baseline so new filter initializes cleanly
-                            filter.last_time = None
-                            filter_type = new_type
-                            try:
-                                safe_queue_put(statusQueue, ('filter_type', filter_type), timeout=QUEUE_PUT_TIMEOUT)
-                            except Exception:
-                                pass
-                            log_info(logQueue, "Fusion Worker", f"Switched filter to {filter_type}")
-                            print(f"[Fusion Worker] Switched filter to {filter_type}")
-                    except Exception as e:
-                        log_warning(logQueue, "Fusion Worker", f"Error switching filter: {e}")
-                    continue
-                # support control commands: 'reset' and ('set_center_threshold', value)
+                # Support control commands: 'reset' and ('set_center_threshold', value)
                 # Accept both bare string commands and tuple/list variants
                 if cmd == 'reset_orientation' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset_orientation'):
                     # Reset orientation state but preserve calibration/bias.
@@ -695,6 +562,29 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                             log_warning(logQueue, "Fusion Worker", f"Invalid alpha roll: {new_val}")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting alpha roll: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_drift_smoothing_time':
+                    try:
+                        new_val = float(cmd[1])
+                        if new_val > 0.0:  # Drift smoothing time must be positive
+                            filter.drift_smoothing_time = new_val
+                            log_info(logQueue, "Fusion Worker", f"Drift smoothing time updated to {new_val}")
+                            print(f"[Fusion Worker] Drift smoothing time updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid drift smoothing time: {new_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting drift smoothing time: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_drift_curve_type':
+                    try:
+                        new_val = str(cmd[1]).lower()
+                        valid_curves = ['exponential', 'linear', 'cosine', 'quadratic']
+                        if new_val in valid_curves:
+                            filter.drift_curve_type = new_val
+                            log_info(logQueue, "Fusion Worker", f"Drift curve type updated to {new_val}")
+                            print(f"[Fusion Worker] Drift curve type updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid drift curve type: {new_val}. Valid options: {valid_curves}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting drift curve type: {e}")
                 elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'recalibrate_gyro_bias') or cmd == ('recalibrate_gyro_bias',):
                     # Runtime recalibration request. Optional second element: number of samples
                     try:
@@ -763,15 +653,57 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error during runtime gyro bias recalibration: {e}")
             
-            # Get data from serial queue with timeout
-            line = safe_queue_get(serialQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
+            # Get data from serial queue - drain queue to process most recent data
+            line = None
+            data_count = 0
+            
+            # Process multiple items per loop iteration to avoid queue backup
+            while data_count < 5:  # Limit to prevent blocking too long
+                latest_line = safe_queue_get(serialQueue, timeout=0.0, default=None)
+                if latest_line is None:
+                    break
+                line = latest_line  # Keep most recent
+                data_count += 1
             
             if line is None:
+                # No data available - check if we should send inactive status
+                current_time = time.time()
+                
+                # If we were previously active and haven't seen data for timeout period
+                if (processing_active and last_data_time is not None and 
+                    (current_time - last_data_time) > data_timeout):
+                    try:
+                        if uiStatusQueue:
+                            safe_queue_put(uiStatusQueue, ('processing', 'inactive'), timeout=QUEUE_PUT_TIMEOUT)
+                        processing_active = False
+                        
+                        # Also clear drift correction and stationary status when going inactive
+                        try:
+                            statusQueue.put_nowait(('drift_correction', False))
+                            last_drift_active = False
+                        except:
+                            pass
+                        try:
+                            statusQueue.put_nowait(('stationary', False))
+                            last_stationary = False
+                        except:
+                            pass
+                            
+                        log_info(logQueue, "Fusion Worker", "Processing inactive - no data received")
+                        print("[Fusion Worker] Processing inactive - no data received")
+                    except Exception as e:
+                        print(f"[Fusion Worker] Failed to send UI inactive status: {e}")
+                
+                # Brief non-blocking delay to prevent CPU spinning
+                time.sleep(0.001)  # 1ms delay instead of blocking timeout
                 continue
             
             try:
                 # Parse and validate IMU data using error_utils
                 timestamp, accel, gyro = parse_imu_line(line)
+                
+                # Update data timestamp
+                last_data_time = time.time()
                 
                 # Update filter
                 yaw, pitch, roll, drift_active, is_stationary = filter.update(gyro, accel, timestamp)
@@ -782,6 +714,8 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if uiStatusQueue:
                             safe_queue_put(uiStatusQueue, ('processing', 'active'), timeout=QUEUE_PUT_TIMEOUT)
                         processing_active = True
+                        log_info(logQueue, "Fusion Worker", "Processing active - data received")
+                        print("[Fusion Worker] Processing active - data received")
                     except Exception as e:
                         print(f"[Fusion Worker] Failed to send UI processing status: {e}")
                         pass
@@ -851,10 +785,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             except Exception as e:
                 log_error(logQueue, "Fusion Worker", f"Unexpected error processing data: {e}")
                 continue
-        
-        # Only add minimal sleep if no data was processed to prevent busy waiting
-        if line is None:
-            time.sleep(FUSION_LOOP_SLEEP_MS / 1000.0)
     
     except KeyboardInterrupt:
         pass
@@ -864,6 +794,16 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
             if uiStatusQueue:
                 safe_queue_put(uiStatusQueue, ('processing', 'inactive'), timeout=QUEUE_PUT_TIMEOUT)
             processing_active = False
+            
+            # Also clear drift correction and stationary status when stopping
+            try:
+                safe_queue_put(statusQueue, ('drift_correction', False), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception:
+                pass
+            try:
+                safe_queue_put(statusQueue, ('stationary', False), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception:
+                pass
         except Exception:
             pass
         log_info(logQueue, "Fusion Worker", "Stopped")

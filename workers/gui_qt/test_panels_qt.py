@@ -23,7 +23,7 @@ from workers.gui_qt.panels.network_panel import NetworkPanelQt
 from workers.gui_qt.panels.message_panel import MessagePanelQt
 from workers.gui_qt.panels.orientation_panel import OrientationPanelQt
 from workers.gui_qt.panels.calibration_panel import CalibrationPanelQt
-from workers.gui_qt.panels.camera_panel import CameraPanelQt
+from workers.gui_qt.panels.diagnostics_panel import DiagnosticsPanelQt
 
 
 class TestAppQt(QMainWindow):
@@ -38,7 +38,6 @@ class TestAppQt(QMainWindow):
         self.serial_control_queue = queue.Queue()
         self.fusion_control_queue = queue.Queue()
         self.udp_control_queue = queue.Queue()
-        self.camera_control_queue = queue.Queue()
         self.message_queue = queue.Queue()
         
         self.setup_ui()
@@ -66,7 +65,7 @@ class TestAppQt(QMainWindow):
         selector_layout.addWidget(QLabel("Panel Under Test:"))
         
         self.panel_selector = QComboBox()
-        self.panel_selector.addItems(["SerialPanel", "StatusBar", "NetworkPanel", "MessagePanel", "OrientationPanel", "CalibrationPanel", "CameraPanel", "All"])
+        self.panel_selector.addItems(["SerialPanel", "StatusBar", "NetworkPanel", "MessagePanel", "OrientationPanel", "CalibrationPanel", "DiagnosticsPanel", "All"])
         self.panel_selector.currentTextChanged.connect(self.on_panel_changed)
         selector_layout.addWidget(self.panel_selector)
         
@@ -201,46 +200,30 @@ class TestAppQt(QMainWindow):
         message_layout.addStretch()
         controls_layout.addWidget(message_row)
         
-        # CameraPanel controls
-        camera_row = QFrame()
-        camera_layout = QHBoxLayout(camera_row)
+        # DiagnosticsPanel controls
+        diagnostics_row = QFrame()
+        diagnostics_layout = QHBoxLayout(diagnostics_row)
         
-        camera_layout.addWidget(QLabel("CameraPanel:"))
+        diagnostics_layout.addWidget(QLabel("DiagnosticsPanel:"))
         
-        preview_btn = QPushButton("Test Preview")
-        preview_btn.clicked.connect(self.test_camera_preview)
-        camera_layout.addWidget(preview_btn)
+        toggle_diag_btn = QPushButton("Toggle Mode")
+        toggle_diag_btn.clicked.connect(self.test_diagnostics_toggle)
+        diagnostics_layout.addWidget(toggle_diag_btn)
         
-        selection_btn = QPushButton("Test Selection")
-        selection_btn.clicked.connect(self.test_camera_selection)
-        camera_layout.addWidget(selection_btn)
+        update_diag_btn = QPushButton("Update Data")
+        update_diag_btn.clicked.connect(self.test_diagnostics_data_update)
+        diagnostics_layout.addWidget(update_diag_btn)
         
-        params_btn = QPushButton("Test Parameters")
-        params_btn.clicked.connect(self.test_camera_params)
-        camera_layout.addWidget(params_btn)
+        clear_diag_btn = QPushButton("Clear Data")
+        clear_diag_btn.clicked.connect(self.test_diagnostics_clear_data)
+        diagnostics_layout.addWidget(clear_diag_btn)
         
-        backend_btn = QPushButton("Test Backend")
-        backend_btn.clicked.connect(self.test_camera_backend)
-        camera_layout.addWidget(backend_btn)
+        diag_prefs_btn = QPushButton("Test Prefs")
+        diag_prefs_btn.clicked.connect(self.test_diagnostics_prefs)
+        diagnostics_layout.addWidget(diag_prefs_btn)
         
-        options_btn = QPushButton("Test Options")
-        options_btn.clicked.connect(self.test_camera_options)
-        camera_layout.addWidget(options_btn)
-        
-        tracking_btn = QPushButton("Test Tracking")
-        tracking_btn.clicked.connect(self.test_position_tracking)
-        camera_layout.addWidget(tracking_btn)
-        
-        camera_prefs_btn = QPushButton("Test Prefs")
-        camera_prefs_btn.clicked.connect(self.test_camera_preferences)
-        camera_layout.addWidget(camera_prefs_btn)
-        
-        image_btn = QPushButton("Test Display")
-        image_btn.clicked.connect(self.test_camera_image_display)
-        camera_layout.addWidget(image_btn)
-        
-        camera_layout.addStretch()
-        controls_layout.addWidget(camera_row)
+        diagnostics_layout.addStretch()
+        controls_layout.addWidget(diagnostics_row)
         
         # General controls
         general_row = QFrame()
@@ -312,11 +295,12 @@ class TestAppQt(QMainWindow):
             padding=6
         )
         
-        # Create CameraPanel (same interface as tkinter version)
-        self.camera_panel = CameraPanelQt(
-            self.camera_control_queue,
-            self.message_queue,
-            self.panel_container
+        # Create DiagnosticsPanel
+        self.diagnostics_panel = DiagnosticsPanelQt(
+            self.panel_container,
+            None,  # No control queue for diagnostics panel
+            self.log_message,
+            padding=6
         )
         
         # Show SerialPanel by default
@@ -343,8 +327,8 @@ class TestAppQt(QMainWindow):
             self.panel_layout.addWidget(self.orientation_panel)
         elif panel_name == "CalibrationPanel":
             self.panel_layout.addWidget(self.calibration_panel)
-        elif panel_name == "CameraPanel":
-            self.panel_layout.addWidget(self.camera_panel)
+        elif panel_name == "DiagnosticsPanel":
+            self.panel_layout.addWidget(self.diagnostics_panel)
         elif panel_name == "All":
             self.panel_layout.addWidget(self.serial_panel)
             self.panel_layout.addWidget(self.status_bar)
@@ -352,7 +336,7 @@ class TestAppQt(QMainWindow):
             self.panel_layout.addWidget(self.message_panel)
             self.panel_layout.addWidget(self.orientation_panel)
             self.panel_layout.addWidget(self.calibration_panel)
-            self.panel_layout.addWidget(self.camera_panel)
+            self.panel_layout.addWidget(self.diagnostics_panel)
         
         self.panel_layout.addStretch()  # Push panels to top
     
@@ -420,11 +404,25 @@ class TestAppQt(QMainWindow):
         self.log_message("PyQt StatusBar ready for testing")
         self.log_message("PyQt NetworkPanel ready for testing")
         self.log_message("PyQt MessagePanel ready for testing")
+        self.log_message("PyQt DiagnosticsPanel ready for testing")
         
         # Add some initial data to MessagePanel for demo
         self.message_panel.append_serial("SERIAL: yaw=0.0, pitch=0.0, roll=0.0")
         self.message_panel.append_message("System initialized")
         self.message_panel.update_displays()
+        
+        # Add some test data to diagnostics panel
+        try:
+            # Enable diagnostics and add a few data points
+            self.diagnostics_panel.enable_checkbox.setChecked(True)
+            import random
+            for i in range(5):
+                yaw = random.uniform(-30, 30)
+                pitch = random.uniform(-15, 15) 
+                roll = random.uniform(-20, 20)
+                self.diagnostics_panel.update_euler(yaw, pitch, roll)
+        except Exception as ex:
+            self.log_message(f"Error generating diagnostics test data: {ex}")
     
     def on_serial_stop(self):
         """Handle serial stop callback (same as tkinter version)."""
@@ -713,7 +711,8 @@ class TestAppQt(QMainWindow):
         except Exception as ex:
             self.log_message(f"Error testing drift angle range: {ex}")
     
-    def test_camera_preview(self):
+    # DiagnosticsPanel Tests
+    def test_diagnostics_toggle(self):
         """Test CameraPanel preview toggle."""
         try:
             self.log_message("Testing camera preview toggle...")
@@ -916,6 +915,78 @@ class TestAppQt(QMainWindow):
             
         except Exception as ex:
             self.log_message(f"Error testing camera image display: {ex}")
+    
+    # DiagnosticsPanel Tests
+    def test_diagnostics_toggle(self):
+        """Test diagnostics enable/disable toggle."""
+        try:
+            # Toggle diagnostics mode
+            current_state = self.diagnostics_panel.is_enabled()
+            self.diagnostics_panel.enable_checkbox.setChecked(not current_state)
+            new_state = self.diagnostics_panel.is_enabled()
+            
+            status = "enabled" if new_state else "disabled"
+            self.log_message(f"Diagnostics mode toggled: {current_state} -> {new_state} ({status})")
+        except Exception as ex:
+            self.log_message(f"Error testing diagnostics toggle: {ex}")
+    
+    def test_diagnostics_data_update(self):
+        """Test updating diagnostics with orientation data."""
+        try:
+            import random
+            
+            # Generate random orientation data
+            yaw = random.uniform(-180, 180)
+            pitch = random.uniform(-90, 90)
+            roll = random.uniform(-180, 180)
+            
+            # Enable diagnostics first
+            self.diagnostics_panel.enable_checkbox.setChecked(True)
+            
+            # Send data update
+            self.diagnostics_panel.update_euler(yaw, pitch, roll)
+            
+            self.log_message(f"Diagnostics data update: Yaw={yaw:.1f}, Pitch={pitch:.1f}, Roll={roll:.1f}")
+            
+            # Check data storage
+            data_points = len(self.diagnostics_panel.data_times)
+            self.log_message(f"Diagnostics has {data_points} data points stored")
+            
+        except Exception as ex:
+            self.log_message(f"Error testing diagnostics data update: {ex}")
+    
+    def test_diagnostics_clear_data(self):
+        """Test clearing diagnostics data."""
+        try:
+            # Clear data
+            self.diagnostics_panel._clear_data()
+            
+            data_points = len(self.diagnostics_panel.data_times)
+            self.log_message(f"Diagnostics data cleared: {data_points} data points remaining")
+            
+        except Exception as ex:
+            self.log_message(f"Error testing diagnostics clear data: {ex}")
+    
+    def test_diagnostics_prefs(self):
+        """Test diagnostics panel preferences save/load."""
+        try:
+            # Get current preferences
+            current_prefs = self.diagnostics_panel.get_prefs()
+            self.log_message(f"Current diagnostics prefs: {current_prefs}")
+            
+            # Test setting preferences
+            test_prefs = {
+                'enabled': True,
+                'max_data_points': 500
+            }
+            self.diagnostics_panel.set_prefs(test_prefs)
+            
+            # Verify preferences were applied
+            new_prefs = self.diagnostics_panel.get_prefs()
+            self.log_message(f"Applied diagnostics prefs: {new_prefs}")
+            
+        except Exception as ex:
+            self.log_message(f"Error testing diagnostics preferences: {ex}")
 
 
 def main():
