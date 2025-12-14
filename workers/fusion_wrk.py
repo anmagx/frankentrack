@@ -50,6 +50,7 @@ class QuaternionComplementaryFilter:
         self.alpha_drift = ALPHA_DRIFT_CORRECTION
         self.drift_smoothing_time = DRIFT_SMOOTHING_TIME
         self.drift_curve_type = DRIFT_TRANSITION_CURVE  # Load from config
+        self.drift_correction_strength = 0.3  # Max correction strength per frame (configurable)
         self.accel_threshold = accel_threshold
         
         # Use separate thresholds if provided, otherwise use default for all
@@ -216,17 +217,9 @@ class QuaternionComplementaryFilter:
             else:
                 factor = min(target_progress, 0.4)
         
-        # Apply smoothness damping to reduce jitter
-        # Scale factor based on angle magnitude - smaller corrections for smaller angles
-        if elapsed_time < self.drift_smoothing_time:
-            angle_magnitude = max(abs(getattr(self, '_last_yaw', 0)), 
-                                abs(getattr(self, '_last_pitch', 0)), 
-                                abs(getattr(self, '_last_roll', 0)))
-            # Reduce factor for smaller angles to make correction even gentler
-            if angle_magnitude < 2.0:  # Very close to center
-                factor *= 0.5
-            elif angle_magnitude < 1.0:  # Extremely close
-                factor *= 0.3
+        # Removed angle_magnitude scaling - we want consistent correction rate
+        # regardless of how close to zero we are. Per-axis correction handles
+        # small angles properly without needing to slow down.
         
         return factor
 
@@ -334,24 +327,46 @@ class QuaternionComplementaryFilter:
                 self._drift_correction_start = timestamp
             
             elapsed_time = timestamp - self._drift_correction_start
-            # Smooth drift correction using configurable curve type
-            smoothing_factor = self._calculate_drift_factor(dt, elapsed_time)
             
-            # Pull quaternion towards zero rotation smoothly over time
-            target_q = self._quat_from_euler(0.0, 0.0, 0.0)
-            # Apply time-based smooth correction with selected curve using SLERP
-            q = self._slerp(q, target_q, smoothing_factor)
+            # Calculate per-frame correction strength based on curve type and elapsed time
+            progress = min(elapsed_time / self.drift_smoothing_time, 1.0)
+            
+            if self.drift_curve_type == 'exponential':
+                # Exponential: stronger correction as time progresses
+                # Use derivative to get per-frame strength
+                base_strength = (1.0 - np.exp(-3.0 * progress)) / max(progress, 0.01)
+                base_rate = base_strength * dt / self.drift_smoothing_time
+                correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
+            elif self.drift_curve_type == 'linear':
+                # Linear: constant correction rate
+                base_rate = dt / self.drift_smoothing_time
+                correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
+            elif self.drift_curve_type == 'cosine':
+                # Cosine ease: smooth variable rate
+                rate = 0.5 * np.pi * np.sin(np.pi * progress) / self.drift_smoothing_time
+                base_rate = rate * dt
+                correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
+            elif self.drift_curve_type == 'quadratic':
+                # Quadratic: accelerating correction
+                rate = 2.0 * progress / self.drift_smoothing_time
+                base_rate = rate * dt
+                correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
+            else:
+                # Fallback to linear
+                base_rate = dt / self.drift_smoothing_time
+                correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
+            
+            # Extract current angles and apply gentle per-frame correction toward zero
+            # This allows user movement to override the correction force
+            current_yaw, current_pitch, current_roll = self._euler_from_quat(q)
+            
+            corrected_yaw = current_yaw * (1.0 - correction_strength)
+            corrected_pitch = current_pitch * (1.0 - correction_strength)
+            corrected_roll = current_roll * (1.0 - correction_strength)
+            
+            # Convert corrected Euler angles back to quaternion
+            q = self._quat_from_euler(corrected_yaw, corrected_pitch, corrected_roll)
             drift_active = True
-            
-            # For final convergence: if very close to zero and correction has been active long enough,
-            # apply gentle correction to eliminate floating point precision issues
-            if elapsed_time > self.drift_smoothing_time * 0.75:  # 75% through smoothing time
-                final_yaw, final_pitch, final_roll = self._euler_from_quat(q)
-                max_angle = max(abs(final_yaw), abs(final_pitch), abs(final_roll))
-                if max_angle < 0.8:  # Tighter threshold for final convergence
-                    # Apply gentle direct correction for final convergence
-                    final_factor = min(0.2, dt * 3.0)  # Much gentler final correction
-                    q = self._slerp(q, target_q, final_factor)  # Use SLERP for smoother final convergence
         else:
             # Reset drift correction timer when not correcting
             self._drift_correction_start = None
@@ -585,6 +600,17 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                             log_warning(logQueue, "Fusion Worker", f"Invalid drift curve type: {new_val}. Valid options: {valid_curves}")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting drift curve type: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_drift_correction_strength':
+                    try:
+                        new_val = float(cmd[1])
+                        if 0.0 < new_val <= 1.0:  # Must be between 0 and 1
+                            filter.drift_correction_strength = new_val
+                            log_info(logQueue, "Fusion Worker", f"Drift correction strength updated to {new_val}")
+                            print(f"[Fusion Worker] Drift correction strength updated to {new_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid drift correction strength: {new_val}. Must be between 0.0 and 1.0")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting drift correction strength: {e}")
                 elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'recalibrate_gyro_bias') or cmd == ('recalibrate_gyro_bias',):
                     # Runtime recalibration request. Optional second element: number of samples
                     try:

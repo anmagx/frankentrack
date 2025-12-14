@@ -59,6 +59,7 @@ class PreferencesPanel(QWidget):
         # Drift correction parameters
         self.drift_smoothing_time = DRIFT_SMOOTHING_TIME
         self.drift_transition_curve = DRIFT_TRANSITION_CURVE
+        self.drift_correction_strength = 0.3  # Default max correction strength per frame (0.1 to 1.0)
         
         # Gyro calibration parameters
         self.gyro_bias_cal_samples = GYRO_BIAS_CAL_SAMPLES
@@ -88,6 +89,11 @@ class PreferencesPanel(QWidget):
         self._drift_smoothing_timer.setSingleShot(True)
         self._drift_smoothing_timer.timeout.connect(self._apply_drift_smoothing)
         self._pending_drift_smoothing = None
+        
+        self._drift_strength_timer = QTimer()
+        self._drift_strength_timer.setSingleShot(True)
+        self._drift_strength_timer.timeout.connect(self._apply_drift_strength)
+        self._pending_drift_strength = None
         
         # Debounce timer for preference saving
         self._prefs_save_timer = QTimer()
@@ -190,6 +196,23 @@ class PreferencesPanel(QWidget):
         smoothing_layout.addWidget(self.drift_smoothing_value)
         drift_layout.addLayout(smoothing_layout)
         
+        # Drift correction strength slider
+        strength_layout = QHBoxLayout()
+        strength_label = QLabel("Correction Strength:")
+        strength_label.setMinimumWidth(80)
+        self.drift_strength_slider = QSlider(Qt.Horizontal)
+        self.drift_strength_slider.setMinimum(10)    # 0.1 (10%)
+        self.drift_strength_slider.setMaximum(100)   # 1.0 (100%)
+        self.drift_strength_slider.setValue(int(self.drift_correction_strength * 100))
+        self.drift_strength_slider.valueChanged.connect(self._on_drift_strength_changed)
+        self.drift_strength_value = QLabel(f"{int(self.drift_correction_strength * 100)}%")
+        self.drift_strength_value.setMinimumWidth(50)
+        
+        strength_layout.addWidget(strength_label)
+        strength_layout.addWidget(self.drift_strength_slider)
+        strength_layout.addWidget(self.drift_strength_value)
+        drift_layout.addLayout(strength_layout)
+        
         # Drift transition curve dropdown
         curve_layout = QHBoxLayout()
         curve_label = QLabel("Transition Curve:")
@@ -205,7 +228,7 @@ class PreferencesPanel(QWidget):
         drift_layout.addLayout(curve_layout)
         
         # Add info label
-        info_label = QLabel("Higher alpha = more gyro dominance. Smoothing time controls drift correction speed. Transition curves: exponential (original), cosine (smooth), linear, quadratic (sharp).")
+        info_label = QLabel("Higher alpha = more gyro dominance. Smoothing time controls drift correction speed. Correction strength caps max pull per frame (higher = stronger correction, may fight user input). Transition curves: exponential (original), cosine (smooth), linear, quadratic (sharp).")
         info_label.setStyleSheet("color: #666666; font-size: 10px;")
         drift_layout.addWidget(info_label)
         
@@ -496,6 +519,21 @@ class PreferencesPanel(QWidget):
         # Debounced preference save
         self._trigger_preference_save()
     
+    def _on_drift_strength_changed(self, value):
+        """Handle drift correction strength slider change with debouncing."""
+        self.drift_correction_strength = value / 100.0
+        self.drift_strength_value.setText(f"{int(self.drift_correction_strength * 100)}%")
+        
+        # Store pending value for debounced sending
+        self._pending_drift_strength = self.drift_correction_strength
+        
+        # Restart debounce timer
+        self._drift_strength_timer.stop()
+        self._drift_strength_timer.start(THRESH_DEBOUNCE_MS)
+        
+        # Debounced preference save
+        self._trigger_preference_save()
+    
     def _on_drift_curve_changed(self, curve_type):
         """Handle drift transition curve selection change."""
         self.drift_transition_curve = curve_type
@@ -536,6 +574,23 @@ class PreferencesPanel(QWidget):
             except Exception:
                 pass
     
+    def _apply_drift_strength(self):
+        """Apply drift correction strength to fusion worker (debounced)."""
+        if self._pending_drift_strength is not None and self.calibration_panel:
+            try:
+                if hasattr(self.calibration_panel, 'control_queue'):
+                    from util.error_utils import safe_queue_put
+                    from config.config import QUEUE_PUT_TIMEOUT
+                    
+                    # Send command to fusion worker
+                    control_queue = self.calibration_panel.control_queue
+                    if control_queue and not control_queue.full():
+                        safe_queue_put(control_queue, ('set_drift_correction_strength', self._pending_drift_strength), timeout=QUEUE_PUT_TIMEOUT)
+                        
+                self._pending_drift_strength = None
+            except Exception:
+                pass
+    
 
     def _emit_preferences_changed(self):
         """Emit preferences changed signal (debounced)."""
@@ -569,6 +624,7 @@ class PreferencesPanel(QWidget):
         # Reset drift correction parameters to defaults
         self.drift_smoothing_time = DRIFT_SMOOTHING_TIME
         self.drift_transition_curve = DRIFT_TRANSITION_CURVE
+        self.drift_correction_strength = 0.3  # Default
         
         # Reset gyro calibration parameters to defaults
         self.gyro_bias_cal_samples = GYRO_BIAS_CAL_SAMPLES
@@ -588,6 +644,8 @@ class PreferencesPanel(QWidget):
         # Update drift correction sliders
         self.drift_smoothing_slider.setValue(int(self.drift_smoothing_time * 10))
         self.drift_smoothing_value.setText(f"{self.drift_smoothing_time:.1f} s")
+        self.drift_strength_slider.setValue(int(self.drift_correction_strength * 100))
+        self.drift_strength_value.setText(f"{int(self.drift_correction_strength * 100)}%")
         
         # Update drift curve dropdown
         index = self.drift_curve_combo.findText(self.drift_transition_curve)
@@ -604,6 +662,7 @@ class PreferencesPanel(QWidget):
         self._pending_stationary_gyro = self.stationary_gyro_threshold
         self._pending_stationary_debounce = self.stationary_debounce_s
         self._pending_drift_smoothing = self.drift_smoothing_time
+        self._pending_drift_strength = self.drift_correction_strength
         
         # Apply immediately (no debounce needed for reset)
         self._apply_alpha_pitch()
@@ -611,6 +670,7 @@ class PreferencesPanel(QWidget):
         self._apply_stationary_gyro()
         self._apply_stationary_debounce()
         self._apply_drift_smoothing()
+        self._apply_drift_strength()
         
         # Visual feedback
         self.reset_btn.setText("Reset!")
@@ -758,6 +818,13 @@ class PreferencesPanel(QWidget):
                     safe_queue_put(self.calibration_panel.control_queue, 
                                  ('set_alpha_roll', alpha_roll), timeout=QUEUE_PUT_TIMEOUT)
                     print(f"[Preferences] Applied startup alpha roll: {alpha_roll}")
+                
+                # Apply drift correction strength
+                if 'drift_correction_strength' in prefs:
+                    strength = float(prefs['drift_correction_strength'])
+                    safe_queue_put(self.calibration_panel.control_queue, 
+                                 ('set_drift_correction_strength', strength), timeout=QUEUE_PUT_TIMEOUT)
+                    print(f"[Preferences] Applied startup drift correction strength: {strength}")
                     
             except Exception as e:
                 print(f"[Preferences] Error applying startup settings to fusion worker: {e}")
@@ -792,6 +859,11 @@ class PreferencesPanel(QWidget):
             self.drift_smoothing_time = float(cal_prefs['drift_smoothing_time'])
             self.drift_smoothing_slider.setValue(int(self.drift_smoothing_time * 10))
             self.drift_smoothing_value.setText(f"{self.drift_smoothing_time:.1f} s")
+        
+        if 'drift_correction_strength' in cal_prefs:
+            self.drift_correction_strength = float(cal_prefs['drift_correction_strength'])
+            self.drift_strength_slider.setValue(int(self.drift_correction_strength * 100))
+            self.drift_strength_value.setText(f"{int(self.drift_correction_strength * 100)}%")
         
         if 'drift_transition_curve' in cal_prefs:
             self.drift_transition_curve = cal_prefs['drift_transition_curve']
@@ -887,7 +959,14 @@ class PreferencesPanel(QWidget):
                 safe_queue_put(self.calibration_panel.control_queue, 
                              ('set_alpha_roll', alpha_roll), timeout=QUEUE_PUT_TIMEOUT)
                 print(f"[Preferences] Applied startup alpha roll: {alpha_roll}")
-                
+            
+            # Apply drift correction strength
+            if 'drift_correction_strength' in cal_prefs:
+                strength = float(cal_prefs['drift_correction_strength'])
+                safe_queue_put(self.calibration_panel.control_queue, 
+                             ('set_drift_correction_strength', strength), timeout=QUEUE_PUT_TIMEOUT)
+                print(f"[Preferences] Applied startup drift correction strength: {strength}")
+                    
         except Exception as e:
             print(f"[Preferences] Error applying startup settings to fusion worker: {e}")
     
@@ -901,6 +980,7 @@ class PreferencesPanel(QWidget):
             'stationary_gyro_threshold': f"{self.stationary_gyro_threshold:.1f}",
             'stationary_debounce_s': f"{self.stationary_debounce_s:.3f}",
             'drift_smoothing_time': f"{self.drift_smoothing_time:.1f}",
+            'drift_correction_strength': f"{self.drift_correction_strength:.2f}",
             'drift_transition_curve': self.drift_transition_curve,
             'gyro_bias_cal_samples': str(self.gyro_bias_cal_samples)
         }
