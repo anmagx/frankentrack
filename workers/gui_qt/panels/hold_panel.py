@@ -139,7 +139,7 @@ class HoldPanelQt(QWidget):
         self._scroll_index = 0
         self._direction = 1
         # Faster update and 5-char wide highlight
-        self._blink_timer.start(30)  # advance every 30ms
+        self._blink_timer.start(15)  # advance every 15ms
         # Immediately render current state
         self._update_scrolling_text()
         

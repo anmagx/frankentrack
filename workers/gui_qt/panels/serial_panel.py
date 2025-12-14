@@ -57,14 +57,17 @@ class SerialPanelQt(BasePanelQt):
         """Setup the serial panel UI (mirrors tkinter layout exactly)."""
         # Main layout with minimal padding
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(4, 1, 4, 1)  # Match calibration panel horizontal padding
-        main_layout.setSpacing(2)  # Minimal spacing
+        # Add modest vertical padding inside the panel
+        main_layout.setContentsMargins(4, 6, 4, 6)  # left, top, right, bottom
+        main_layout.setSpacing(4)  # Slightly increased spacing
         
         # Serial controls frame (same pattern as network panel)
         controls_frame = QFrame()
+        # Prevent the controls frame from expanding vertically
+        controls_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QGridLayout(controls_frame)
-        layout.setContentsMargins(6, 0, 6, 0)  # Match calibration frame horizontal padding
-        layout.setSpacing(2)  # Minimal spacing
+        layout.setContentsMargins(6, 4, 6, 4)  # add vertical padding inside controls frame
+        layout.setSpacing(4)  # Slightly increased spacing
         
         # Serial Port selection (same as tkinter)
         port_label = QLabel("Port:")
@@ -105,6 +108,8 @@ class SerialPanelQt(BasePanelQt):
         layout.addWidget(self.toggle_button, 0, 6)
         
         main_layout.addWidget(controls_frame)
+        # Allow the panel to expand vertically to fill available space
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
     def _on_port_changed(self, port):
         """Handle port selection change."""

@@ -45,26 +45,32 @@ class StatusBarQt(QGroupBox):
         
         # Message Rate (same as tkinter)
         msg_rate_label = QLabel("Message Rate:")
+        msg_rate_label.setAlignment(Qt.AlignVCenter)
         layout.addWidget(msg_rate_label)
         
         self.msg_rate_value = QLabel(self._msg_rate_text)
         self.msg_rate_value.setMinimumWidth(65)  # Similar to tkinter width=12
+        self.msg_rate_value.setAlignment(Qt.AlignVCenter)
         layout.addWidget(self.msg_rate_value)
         
         # Send Rate (same as tkinter)
         send_rate_label = QLabel("Send Rate:")
+        send_rate_label.setAlignment(Qt.AlignVCenter)
         layout.addWidget(send_rate_label)
         
         self.send_rate_value = QLabel(self._send_rate_text)
         self.send_rate_value.setMinimumWidth(65)  # Similar to tkinter width=12
+        self.send_rate_value.setAlignment(Qt.AlignVCenter)
         layout.addWidget(self.send_rate_value)
         
         # Camera FPS (same as tkinter)
         camera_fps_label = QLabel("Camera FPS:")
+        camera_fps_label.setAlignment(Qt.AlignVCenter)
         layout.addWidget(camera_fps_label)
         
         self.camera_fps_value = QLabel(self._camera_fps_text)
         self.camera_fps_value.setMinimumWidth(65)  # Similar to tkinter width=12
+        self.camera_fps_value.setAlignment(Qt.AlignVCenter)
         layout.addWidget(self.camera_fps_value)
         
         # Spacer to push device status to the right (same as tkinter side="right")
@@ -73,7 +79,7 @@ class StatusBarQt(QGroupBox):
         
         # Device movement status (right side, same as tkinter)
         self.device_status_label = QLabel(self._device_status_text)
-        self.device_status_label.setAlignment(Qt.AlignRight)
+        self.device_status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.device_status_label)
     
     def update_message_rate(self, rate):

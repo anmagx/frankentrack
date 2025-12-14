@@ -9,7 +9,7 @@ Provides UDP network configuration controls:
 """
 
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, 
-                             QPushButton, QFrame, QGridLayout)
+                             QPushButton, QFrame, QGridLayout, QSizePolicy)
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QValidator, QIntValidator
 
@@ -53,13 +53,16 @@ class NetworkPanelQt(BasePanelQt):
         """Build the network panel UI (mirrors tkinter layout exactly)."""
         # Main layout with minimal padding
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(4, 1, 4, 1)  # Match calibration panel horizontal padding
-        main_layout.setSpacing(2)  # Minimal spacing
+        # Add modest vertical padding inside the panel
+        main_layout.setContentsMargins(4, 6, 4, 6)  # left, top, right, bottom
+        main_layout.setSpacing(4)  # Slightly increased spacing
         
         # Network controls frame (same as tkinter net_frm)
         controls_frame = QFrame()
+        # Prevent the controls frame from expanding vertically
+        controls_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         controls_layout = QHBoxLayout(controls_frame)
-        controls_layout.setContentsMargins(6, 0, 6, 0)  # Match calibration frame horizontal padding
+        controls_layout.setContentsMargins(6, 4, 6, 4)  # add vertical padding inside controls frame
         controls_layout.setSpacing(4)  # Slightly reduced spacing
         
         # IP Address entry (same as tkinter)
@@ -99,6 +102,8 @@ class NetworkPanelQt(BasePanelQt):
         controls_layout.addWidget(self.udp_toggle_btn)
         
         main_layout.addWidget(controls_frame)
+        # Allow the panel to expand vertically to fill available space
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
     def _on_ip_changed(self, text):
         """Handle IP address entry change."""

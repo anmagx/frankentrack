@@ -8,7 +8,7 @@ from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
     QComboBox, QPushButton, QSpacerItem, QSizePolicy, QDialog, QSlider,
-    QSpinBox, QFrame
+    QSpinBox, QFrame, QScrollArea
 )
 
 from workers.gui_qt.managers.preferences_manager import PreferencesManager
@@ -104,11 +104,35 @@ class PreferencesPanel(QWidget):
         self._prefs_save_timer.setSingleShot(True)
         self._prefs_save_timer.timeout.connect(self._emit_preferences_changed)
         
+        # Set size policy to expand and fill available space
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
         self.setup_ui()
     
     def setup_ui(self):
         """Set up the user interface."""
-        layout = QVBoxLayout()
+        # Main layout for this widget
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Buttons will be placed in a bottom fixed row (added after scroll area)
+
+        # Create scroll area to contain all content (below top buttons)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll_area.setMinimumHeight(0)
+        scroll_area.setMaximumHeight(16777215)
+        # Keep a reference so we can resize it to fill available height
+        self._scroll_area = scroll_area
+
+        # Container widget for scroll area content
+        container = QWidget()
+        container.setObjectName("preferencesContainer")
+        container.setAutoFillBackground(True)  # Use theme background
+        layout = QVBoxLayout(container)
         
         # Theme selection group
         if THEMES_ENABLED:
@@ -188,20 +212,20 @@ class PreferencesPanel(QWidget):
         roll_layout.addWidget(self.alpha_roll_value)
         drift_layout.addLayout(roll_layout)
 
-        # Short tooltip specific to alpha sliders (placed under Roll Alpha)
-        alpha_info_label = QLabel("Higher alpha = more gyro dominance.")
-        alpha_info_label.setStyleSheet("color: #666666; font-size: 10px;")
-        alpha_info_label.setWordWrap(True)
-        alpha_info_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        drift_layout.addWidget(alpha_info_label)
-        
-        # Divider after the alpha tooltip
+        # Divider rafter before the alpha tooltip
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
         divider.setFrameShadow(QFrame.Sunken)
         divider.setObjectName("sectionDivider")
         divider.setFixedHeight(1)
         drift_layout.addWidget(divider)
+
+        # Short tooltip specific to alpha sliders (placed under Roll Alpha)
+        alpha_info_label = QLabel("Higher alpha = more gyro dominance.")
+        alpha_info_label.setStyleSheet("color: #666666; font-size: 10px;")
+        alpha_info_label.setWordWrap(True)
+        alpha_info_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        drift_layout.addWidget(alpha_info_label)
 
         # Header for drift correction controls
         drift_curve_header = QLabel("Drift Correction (when near center)")
@@ -358,26 +382,23 @@ class PreferencesPanel(QWidget):
         gyro_group.setLayout(gyro_layout)
         layout.addWidget(gyro_group)
         
-        # Control buttons
-        button_layout = QHBoxLayout()
-        
-        self.apply_btn = QPushButton("Apply")
-        self.apply_btn.clicked.connect(self._apply_preferences)
-        
+        # Set container as scroll area widget and add it to the main layout
+        scroll_area.setWidget(container)
+        main_layout.addWidget(scroll_area, 1)
+        # Bottom fixed row with Reset and Apply buttons
+        bottom_btn_layout = QHBoxLayout()
+        bottom_btn_layout.addStretch()
         self.reset_btn = QPushButton("Reset to Defaults")
         self.reset_btn.clicked.connect(self._reset_to_defaults)
-        
-        button_layout.addStretch()
-        button_layout.addWidget(self.reset_btn)
-        button_layout.addWidget(self.apply_btn)
-        
-        layout.addLayout(button_layout)
-        
-        # Add spacer at bottom
-        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        layout.addItem(spacer)
-        
-        self.setLayout(layout)
+        self.apply_btn = QPushButton("Apply")
+        self.apply_btn.clicked.connect(self._apply_preferences)
+        bottom_btn_layout.addWidget(self.reset_btn)
+        bottom_btn_layout.addWidget(self.apply_btn)
+        main_layout.addLayout(bottom_btn_layout)
+        self.setLayout(main_layout)
+
+    # Let Qt layouts manage sizing; remove forced resize adjustments
+    
     
     def load_preferences(self):
         """Load all preferences from config file via PreferencesManager, update UI, and sync with fusion worker."""

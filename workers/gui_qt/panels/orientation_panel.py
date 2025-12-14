@@ -5,7 +5,7 @@ Display-only panel showing Euler angles (Yaw, Pitch, Roll) and position (X, Y, Z
 No controls - purely for data visualization.
 """
 from PyQt5.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout, 
-                             QLabel)
+                             QLabel, QSizePolicy)
 from PyQt5.QtCore import Qt
 
 
@@ -45,9 +45,13 @@ class OrientationPanelQt(QGroupBox):
         """Build the orientation panel UI."""
         # Main layout - single column for data displays only
         main_layout = QVBoxLayout()
+        # Add modest vertical padding inside the panel to match other panels
         main_layout.setSpacing(6)
-        main_layout.setContentsMargins(4, 2, 4, 2)
+        main_layout.setContentsMargins(4, 6, 4, 6)
         self.setLayout(main_layout)
+        
+        # Allow panel to expand vertically to fill available space when appropriate
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         # Build display components
         self._build_euler_displays(main_layout)
@@ -57,7 +61,7 @@ class OrientationPanelQt(QGroupBox):
         """Build Euler angle (Yaw, Pitch, Roll) display row."""
         # Create grid layout for euler angles
         euler_grid = QGridLayout()
-        euler_grid.setContentsMargins(6, 0, 6, 0)  # Add horizontal padding
+        euler_grid.setContentsMargins(6, 4, 6, 4)  # Add horizontal + vertical padding
         
         # Row 0: Yaw, Pitch, Roll
         euler_grid.addWidget(QLabel("Yaw:"), 0, 0)
@@ -85,7 +89,7 @@ class OrientationPanelQt(QGroupBox):
         """Build position (X, Y, Z) display row."""
         # Create grid layout for positions
         position_grid = QGridLayout()
-        position_grid.setContentsMargins(6, 0, 6, 0)  # Add horizontal padding
+        position_grid.setContentsMargins(6, 4, 6, 4)  # Add horizontal + vertical padding
         
         # Row 0: X, Y, Z positions
         position_grid.addWidget(QLabel("X:"), 0, 0)

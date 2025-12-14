@@ -5,7 +5,7 @@ Contains drift correction angle control, and runtime
 controls for resetting orientation and recalibrating gyro bias.
 """
 from PyQt5.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout,
-                             QLabel, QPushButton, QSlider, QFrame, QWidget, QComboBox, QDialog, QApplication)
+                             QLabel, QPushButton, QSlider, QFrame, QWidget, QComboBox, QDialog, QApplication, QSizePolicy)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QKeySequence
 
@@ -547,10 +547,14 @@ class CalibrationPanelQt(QGroupBox):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
         main_layout.setSpacing(6)
-        main_layout.setContentsMargins(4, 2, 4, 2)
+        main_layout.setContentsMargins(4, 6, 4, 6)
+        # Allow the calibration panel to expand vertically to fill available space
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Filter and reset controls frame at top
         controls_frame = QFrame()
+        # Prevent top controls from expanding vertically
+        controls_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         controls_layout = QHBoxLayout(controls_frame)
         controls_layout.setSpacing(4)
         controls_layout.setContentsMargins(6, 4, 6, 4)
@@ -573,6 +577,8 @@ class CalibrationPanelQt(QGroupBox):
         
         # Second row of controls
         controls2_frame = QFrame()
+        # Prevent second-row controls from expanding vertically
+        controls2_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         controls2_layout = QHBoxLayout(controls2_frame)
         controls2_layout.setSpacing(4)
         controls2_layout.setContentsMargins(6, 4, 6, 4)

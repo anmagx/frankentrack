@@ -8,7 +8,7 @@ Provides two text display areas:
 """
 
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QTextEdit, QScrollBar, 
-                             QGroupBox, QSplitter)
+                             QGroupBox, QSplitter, QSizePolicy)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCursor
 
@@ -62,8 +62,9 @@ class MessagePanelQt(QFrame):
         self.serial_text = QTextEdit()
         self.serial_text.setReadOnly(True)  # Same as tkinter state="disabled"
         self.serial_text.setLineWrapMode(QTextEdit.NoWrap)  # Same as tkinter wrap="none"
-        self.serial_text.setMinimumHeight(self.serial_height * 20)  # Approximate line height
-        self.serial_text.setMaximumHeight(self.serial_height * 25)  # Limit height like tkinter
+        self.serial_text.setMinimumHeight(80)  # Reduced minimum height
+        # Allow the serial text to expand vertically when space is available
+        self.serial_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Set monospace font for serial data (better readability)
         font = QFont("Courier New", 9)
@@ -82,7 +83,9 @@ class MessagePanelQt(QFrame):
         self.message_text = QTextEdit()
         self.message_text.setReadOnly(True)  # Same as tkinter state="disabled"
         self.message_text.setLineWrapMode(QTextEdit.NoWrap)  # Same as tkinter wrap="none"
-        self.message_text.setMinimumHeight(self.message_height * 20)  # Approximate line height
+        self.message_text.setMinimumHeight(80)  # Reduced minimum height
+        # Allow the message text to expand vertically to fill remaining space
+        self.message_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Set monospace font for messages too
         self.message_text.setFont(font)
@@ -95,6 +98,9 @@ class MessagePanelQt(QFrame):
         # Messages: expand=True (takes remaining space)
         main_layout.setStretchFactor(serial_group, 0)
         main_layout.setStretchFactor(messages_group, 1)
+        
+        # Allow the message panel to expand vertically to fill available space
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     
     def append_serial(self, line):
         """

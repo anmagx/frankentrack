@@ -271,8 +271,7 @@ class TabbedGUIWorker(QMainWindow):
         self.preferences_panel.theme_changed.connect(self._apply_theme)
         self.preferences_panel.preferences_changed.connect(self.save_preferences)
         
-        layout.addWidget(self.preferences_panel)
-        layout.addStretch()
+        layout.addWidget(self.preferences_panel, 1)
         
         # Add tab
         self.tab_widget.addTab(preferences_widget, "⚙️ Preferences")
@@ -605,32 +604,31 @@ class TabbedGUIWorker(QMainWindow):
                 self.message_panel.update_displays()
     
     def _finalize_window_size(self):
-        """Finalize window size to start at minimum dimensions and prevent auto-expansion."""
-        # Force layout calculation for accuracy
+        """Set initial window size to the central widget's sizeHint (small),
+        then apply that as the minimum size so it opens compact and grows only as needed.
+        """
+        # Ensure layouts are up to date
         self.adjustSize()
-        
-        # Get the minimum size hint from the central widget
-        min_size_hint = self.centralWidget().minimumSizeHint()
-        if min_size_hint.isEmpty():
-            min_size_hint = self.centralWidget().sizeHint()
-        
-        # Minimal padding for window decorations only
-        min_width = min_size_hint.width() + 10  # Minimal decoration padding
-        min_height = min_size_hint.height() + 40  # Title bar + minimal padding
-        
-        # Apply reasonable maximum width constraint to prevent overly wide initial windows
-        max_width = 600  # More aggressive maximum width for narrower windows
-        min_width = min(min_width, max_width)
-        
-        # Set both minimum and maximum size to lock the initial dimensions
-        self.setMinimumSize(min_width - 20, min_height - 20)
-        self.setMaximumSize(min_width, min_height)
-        
-        # Resize to the calculated size
-        self.resize(min_width, min_height)
-        
-        # After a short delay, remove maximum size constraint to allow user resizing
-        QTimer.singleShot(100, self._enable_resizing)
+
+        # Prefer the minimumSizeHint (smaller, required minimum for content)
+        hint = self.centralWidget().minimumSizeHint()
+        if hint.isEmpty():
+            hint = self.centralWidget().sizeHint()
+
+        # Small decoration padding to account for window chrome (kept minimal)
+        target_w = max(200, hint.width() + 8)
+        target_h = max(240, hint.height() + 20)
+
+        # Constrain initial width to avoid extremely wide default
+        max_width = 600
+        target_w = min(target_w, max_width)
+
+        # Resize to the target and make it the minimum start size
+        self.resize(target_w, target_h)
+        self.setMinimumSize(target_w, target_h)
+
+        # Allow immediate resizing by the user (no temporary maximum lock)
+        QTimer.singleShot(50, self._enable_resizing)
     
     def _enable_resizing(self):
         """Remove maximum size constraint to allow user resizing while preserving minimum size."""
