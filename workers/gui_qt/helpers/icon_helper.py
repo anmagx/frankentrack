@@ -3,7 +3,7 @@
 Places the project's `img/icon.ico` on PyQt5 windows when available.
 
 Usage:
-    from workers.gui_qt.managers.icon_helper import set_window_icon
+    from workers.gui_qt.helpers.icon_helper import set_window_icon
     set_window_icon(qt_window)
 """
 import os

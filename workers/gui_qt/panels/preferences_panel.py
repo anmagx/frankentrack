@@ -4,10 +4,11 @@ Preferences panel for frankentrack GUI.
 Provides user interface for application settings including theme selection.
 """
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
     QComboBox, QPushButton, QSpacerItem, QSizePolicy, QDialog, QSlider,
-    QSpinBox
+    QSpinBox, QFrame
 )
 
 from workers.gui_qt.managers.preferences_manager import PreferencesManager
@@ -51,6 +52,9 @@ class PreferencesPanel(QWidget):
         # Drift correction alpha values
         self.alpha_pitch = ALPHA_PITCH
         self.alpha_roll = ALPHA_ROLL
+        
+        # Flag to prevent preference saves during initial load
+        self._loading = True
         
         # Stationary detection parameters
         self.stationary_gyro_threshold = STATIONARY_GYRO_THRESHOLD
@@ -146,6 +150,11 @@ class PreferencesPanel(QWidget):
         drift_layout.setSpacing(8)
         
         # Pitch alpha slider
+        # Header for pitch/roll stability controls
+        pitch_header = QLabel("Pitch & Roll stability")
+        pitch_header.setStyleSheet("font-weight: 600; margin-bottom: 6px;")
+        drift_layout.addWidget(pitch_header)
+
         pitch_layout = QHBoxLayout()
         pitch_label = QLabel("Pitch Alpha:")
         pitch_label.setMinimumWidth(80)
@@ -178,7 +187,41 @@ class PreferencesPanel(QWidget):
         roll_layout.addWidget(self.alpha_roll_slider)
         roll_layout.addWidget(self.alpha_roll_value)
         drift_layout.addLayout(roll_layout)
+
+        # Short tooltip specific to alpha sliders (placed under Roll Alpha)
+        alpha_info_label = QLabel("Higher alpha = more gyro dominance.")
+        alpha_info_label.setStyleSheet("color: #666666; font-size: 10px;")
+        alpha_info_label.setWordWrap(True)
+        alpha_info_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        drift_layout.addWidget(alpha_info_label)
         
+        # Divider after the alpha tooltip
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFrameShadow(QFrame.Sunken)
+        divider.setObjectName("sectionDivider")
+        divider.setFixedHeight(1)
+        drift_layout.addWidget(divider)
+
+        # Header for drift correction controls
+        drift_curve_header = QLabel("Drift Correction (when near center)")
+        drift_curve_header.setStyleSheet("font-weight: 600; margin-top: 8px; margin-bottom: 6px;")
+        drift_layout.addWidget(drift_curve_header)
+
+        # Drift transition curve dropdown (moved above smoothing time)
+        curve_layout = QHBoxLayout()
+        curve_label = QLabel("Transition Curve:")
+        curve_label.setMinimumWidth(80)
+        self.drift_curve_combo = QComboBox()
+        self.drift_curve_combo.addItems(["exponential", "cosine", "linear", "quadratic"])
+        self.drift_curve_combo.setCurrentText(self.drift_transition_curve)
+        self.drift_curve_combo.currentTextChanged.connect(self._on_drift_curve_changed)
+
+        curve_layout.addWidget(curve_label)
+        curve_layout.addWidget(self.drift_curve_combo)
+        curve_layout.addStretch()
+        drift_layout.addLayout(curve_layout)
+
         # Drift smoothing time slider
         smoothing_layout = QHBoxLayout()
         smoothing_label = QLabel("Smoothing Time:")
@@ -190,12 +233,12 @@ class PreferencesPanel(QWidget):
         self.drift_smoothing_slider.valueChanged.connect(self._on_drift_smoothing_changed)
         self.drift_smoothing_value = QLabel(f"{self.drift_smoothing_time:.1f} s")
         self.drift_smoothing_value.setMinimumWidth(50)
-        
+
         smoothing_layout.addWidget(smoothing_label)
         smoothing_layout.addWidget(self.drift_smoothing_slider)
         smoothing_layout.addWidget(self.drift_smoothing_value)
         drift_layout.addLayout(smoothing_layout)
-        
+
         # Drift correction strength slider
         strength_layout = QHBoxLayout()
         strength_label = QLabel("Correction Strength:")
@@ -207,30 +250,18 @@ class PreferencesPanel(QWidget):
         self.drift_strength_slider.valueChanged.connect(self._on_drift_strength_changed)
         self.drift_strength_value = QLabel(f"{int(self.drift_correction_strength * 100)}%")
         self.drift_strength_value.setMinimumWidth(50)
-        
+
         strength_layout.addWidget(strength_label)
         strength_layout.addWidget(self.drift_strength_slider)
         strength_layout.addWidget(self.drift_strength_value)
         drift_layout.addLayout(strength_layout)
         
-        # Drift transition curve dropdown
-        curve_layout = QHBoxLayout()
-        curve_label = QLabel("Transition Curve:")
-        curve_label.setMinimumWidth(80)
-        self.drift_curve_combo = QComboBox()
-        self.drift_curve_combo.addItems(["exponential", "cosine", "linear", "quadratic"])
-        self.drift_curve_combo.setCurrentText(self.drift_transition_curve)
-        self.drift_curve_combo.currentTextChanged.connect(self._on_drift_curve_changed)
-        
-        curve_layout.addWidget(curve_label)
-        curve_layout.addWidget(self.drift_curve_combo)
-        curve_layout.addStretch()
-        drift_layout.addLayout(curve_layout)
-        
-        # Add info label
-        info_label = QLabel("Higher alpha = more gyro dominance. Smoothing time controls drift correction speed. Correction strength caps max pull per frame (higher = stronger correction, may fight user input). Transition curves: exponential (original), cosine (smooth), linear, quadratic (sharp).")
-        info_label.setStyleSheet("color: #666666; font-size: 10px;")
-        drift_layout.addWidget(info_label)
+        # Add info label describing smoothing, strength and curve options (bottom of calibration frame)
+        drift_info_label = QLabel("Smoothing time controls drift correction speed. Correction strength caps the maximum correction per frame (higher = stronger correction, may fight user input). Transition curves: exponential (original), cosine (smooth), linear, quadratic (sharp).")
+        drift_info_label.setStyleSheet("color: #666666; font-size: 10px;")
+        drift_info_label.setWordWrap(True)
+        drift_info_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        drift_layout.addWidget(drift_info_label)
         
         drift_group.setLayout(drift_layout)
         layout.addWidget(drift_group)
@@ -294,9 +325,24 @@ class PreferencesPanel(QWidget):
         self.gyro_samples_slider = QSlider(Qt.Horizontal)
         self.gyro_samples_slider.setMinimum(500)  # 500 samples
         self.gyro_samples_slider.setMaximum(5000)  # 5000 samples
-        self.gyro_samples_slider.setValue(self.gyro_bias_cal_samples)
+        # Use 250-sample increments
+        self.gyro_samples_slider.setSingleStep(250)
+        self.gyro_samples_slider.setPageStep(250)
+        # Set tick interval and position (use module-level QSlider)
+        try:
+            self.gyro_samples_slider.setTickInterval(250)
+            self.gyro_samples_slider.setTickPosition(QSlider.TicksBelow)
+        except Exception:
+            pass
+        # Round initial value to nearest 250 and clamp
+        try:
+            init_val = int(round(float(self.gyro_bias_cal_samples) / 250.0) * 250)
+        except Exception:
+            init_val = 500
+        init_val = max(500, min(5000, init_val))
+        self.gyro_samples_slider.setValue(init_val)
         self.gyro_samples_slider.valueChanged.connect(self._on_gyro_samples_changed)
-        self.gyro_samples_value = QLabel(str(self.gyro_bias_cal_samples))
+        self.gyro_samples_value = QLabel(str(init_val))
         self.gyro_samples_value.setMinimumWidth(60)
         
         samples_layout.addWidget(samples_label)
@@ -357,6 +403,18 @@ class PreferencesPanel(QWidget):
         
         # Send settings to fusion worker
         self._apply_settings_to_fusion_worker(cal_prefs)
+        
+        # Clear loading flag after initial load is complete
+        self._loading = False
+
+    def _safe_set_reset_shortcut(self, cal_panel, key, display_name):
+        """Safely call calibration panel's _set_reset_shortcut without raising if deleted."""
+        try:
+            if cal_panel:
+                cal_panel._set_reset_shortcut(key, display_name)
+        except Exception:
+            # Ignore errors from deleted C++ wrappers or other issues
+            pass
     
 
     
@@ -366,7 +424,9 @@ class PreferencesPanel(QWidget):
             # Save preference and emit signals
             self.prefs_manager.set_theme(theme_name)
             self.theme_changed.emit(theme_name)
-            self.preferences_changed.emit()  # Notify parent to save all preferences
+            # Only emit preferences changed if not loading to prevent duplicate saves
+            if not getattr(self, '_loading', False):
+                self.preferences_changed.emit()  # Notify parent to save all preferences
     
     def _apply_preferences(self):
         """Apply current preference settings."""
@@ -544,7 +604,6 @@ class PreferencesPanel(QWidget):
                 control_queue = self.calibration_panel.control_queue
                 if control_queue and not control_queue.full():
                     safe_queue_put(control_queue, ('set_drift_curve_type', curve_type), timeout=QUEUE_PUT_TIMEOUT)
-                    print(f"[Preferences] Sent drift curve type: {curve_type}")
             except Exception as e:
                 print(f"[Preferences] Failed to send drift curve command: {e}")
         
@@ -552,8 +611,23 @@ class PreferencesPanel(QWidget):
     
     def _on_gyro_samples_changed(self, value):
         """Handle gyro calibration samples slider change."""
-        self.gyro_bias_cal_samples = value
-        self.gyro_samples_value.setText(str(value))
+        # Snap value to 250-sample increments and clamp to valid range
+        try:
+            snapped = int(round(float(value) / 250.0) * 250)
+        except Exception:
+            snapped = 500
+        snapped = max(500, min(5000, snapped))
+
+        # If slider produced a non-snapped value, update slider to snapped value
+        if snapped != value:
+            try:
+                self.gyro_samples_slider.setValue(snapped)
+            except Exception:
+                pass
+
+        # Update stored value and label
+        self.gyro_bias_cal_samples = snapped
+        self.gyro_samples_value.setText(str(snapped))
         # Note: This affects next recalibration, not current session
         self._trigger_preference_save()
     
@@ -594,7 +668,9 @@ class PreferencesPanel(QWidget):
 
     def _emit_preferences_changed(self):
         """Emit preferences changed signal (debounced)."""
-        self.preferences_changed.emit()
+        # Only emit if not loading to prevent duplicate saves during startup
+        if not getattr(self, '_loading', False):
+            self.preferences_changed.emit()
     
     def _trigger_preference_save(self):
         """Trigger a debounced preference save."""
@@ -652,9 +728,15 @@ class PreferencesPanel(QWidget):
         if index >= 0:
             self.drift_curve_combo.setCurrentIndex(index)
         
-        # Update gyro calibration sliders
-        self.gyro_samples_slider.setValue(self.gyro_bias_cal_samples)
-        self.gyro_samples_value.setText(str(self.gyro_bias_cal_samples))
+        # Update gyro calibration sliders (round defaults to nearest 250)
+        try:
+            def_val = int(round(float(self.gyro_bias_cal_samples) / 250.0) * 250)
+        except Exception:
+            def_val = 500
+        def_val = max(500, min(5000, def_val))
+        self.gyro_bias_cal_samples = def_val
+        self.gyro_samples_slider.setValue(def_val)
+        self.gyro_samples_value.setText(str(def_val))
         
         # Update fusion worker with debounced values
         self._pending_alpha_pitch = self.alpha_pitch
@@ -731,8 +813,9 @@ class PreferencesPanel(QWidget):
             if self.calibration_panel:
                 self.calibration_panel._set_reset_shortcut(key, display_name)
             
-            # Save to preferences immediately
-            self.preferences_changed.emit()
+            # Save to preferences immediately (only if not loading)
+            if not getattr(self, '_loading', False):
+                self.preferences_changed.emit()
             print(f"[Preferences] Shortcut saved to preferences and activated")
         else:
             # Dialog was cancelled - restore the previous shortcut monitoring
@@ -782,7 +865,8 @@ class PreferencesPanel(QWidget):
                     from PyQt5.QtCore import QTimer
                     # Check if calibration panel is initializing to prevent duplicate messages
                     if not getattr(self.calibration_panel, '_initializing', False):
-                        QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut(shortcut, display_name))
+                        cal = self.calibration_panel
+                        QTimer.singleShot(0, lambda _cal=cal, _s=shortcut, _d=display_name: self._safe_set_reset_shortcut(_cal, _s, _d))
             except Exception:
                 pass
         else:
@@ -794,40 +878,10 @@ class PreferencesPanel(QWidget):
                 from PyQt5.QtCore import QTimer
                 # Check if calibration panel is initializing to prevent duplicate messages
                 if not getattr(self.calibration_panel, '_initializing', False):
-                    QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut("None", "None"))
+                    cal = self.calibration_panel
+                    QTimer.singleShot(0, lambda _cal=cal: self._safe_set_reset_shortcut(_cal, "None", "None"))
         
-        # Load and apply other calibration preferences to fusion worker
-        # This ensures saved settings are applied at startup, not just when changed in GUI
-        if hasattr(self.calibration_panel, 'control_queue') and self.calibration_panel.control_queue:
-            try:
-                # Apply drift curve setting to fusion worker
-                drift_curve = prefs.get('drift_transition_curve', DRIFT_TRANSITION_CURVE)
-                safe_queue_put(self.calibration_panel.control_queue, 
-                             ('set_drift_curve_type', drift_curve), timeout=QUEUE_PUT_TIMEOUT)
-                print(f"[Preferences] Applied startup drift curve: {drift_curve}")
-                
-                # Apply alpha values to fusion worker
-                if 'alpha_pitch' in prefs:
-                    alpha_pitch = float(prefs['alpha_pitch'])
-                    safe_queue_put(self.calibration_panel.control_queue, 
-                                 ('set_alpha_pitch', alpha_pitch), timeout=QUEUE_PUT_TIMEOUT)
-                    print(f"[Preferences] Applied startup alpha pitch: {alpha_pitch}")
-                
-                if 'alpha_roll' in prefs:
-                    alpha_roll = float(prefs['alpha_roll'])
-                    safe_queue_put(self.calibration_panel.control_queue, 
-                                 ('set_alpha_roll', alpha_roll), timeout=QUEUE_PUT_TIMEOUT)
-                    print(f"[Preferences] Applied startup alpha roll: {alpha_roll}")
-                
-                # Apply drift correction strength
-                if 'drift_correction_strength' in prefs:
-                    strength = float(prefs['drift_correction_strength'])
-                    safe_queue_put(self.calibration_panel.control_queue, 
-                                 ('set_drift_correction_strength', strength), timeout=QUEUE_PUT_TIMEOUT)
-                    print(f"[Preferences] Applied startup drift correction strength: {strength}")
-                    
-            except Exception as e:
-                print(f"[Preferences] Error applying startup settings to fusion worker: {e}")
+        # Settings are applied by _apply_settings_to_fusion_worker() instead
     
     def _load_alpha_settings(self, cal_prefs):
         """Load alpha filter settings."""
@@ -874,9 +928,16 @@ class PreferencesPanel(QWidget):
     def _load_gyro_settings(self, cal_prefs):
         """Load gyro calibration settings."""
         if 'gyro_bias_cal_samples' in cal_prefs:
-            self.gyro_bias_cal_samples = int(cal_prefs['gyro_bias_cal_samples'])
-            self.gyro_samples_slider.setValue(self.gyro_bias_cal_samples)
-            self.gyro_samples_value.setText(str(self.gyro_bias_cal_samples))
+            try:
+                val = int(cal_prefs['gyro_bias_cal_samples'])
+            except Exception:
+                val = int(self.gyro_bias_cal_samples)
+            # Round to nearest 250 and clamp
+            val = int(round(float(val) / 250.0) * 250)
+            val = max(500, min(5000, val))
+            self.gyro_bias_cal_samples = val
+            self.gyro_samples_slider.setValue(val)
+            self.gyro_samples_value.setText(str(val))
     
     def _load_shortcut_settings(self, cal_prefs):
         """Load keyboard shortcut settings."""
@@ -915,7 +976,8 @@ class PreferencesPanel(QWidget):
                     from PyQt5.QtCore import QTimer
                     # Check if calibration panel is initializing to prevent duplicate messages
                     if not getattr(self.calibration_panel, '_initializing', False):
-                        QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut(shortcut, display_name))
+                        cal = self.calibration_panel
+                        QTimer.singleShot(0, lambda _cal=cal, _s=shortcut, _d=display_name: self._safe_set_reset_shortcut(_cal, _s, _d))
             except Exception:
                 pass
         else:
@@ -928,7 +990,8 @@ class PreferencesPanel(QWidget):
                 from PyQt5.QtCore import QTimer
                 # Check if calibration panel is initializing to prevent duplicate messages
                 if not getattr(self.calibration_panel, '_initializing', False):
-                    QTimer.singleShot(0, lambda: self.calibration_panel._set_reset_shortcut("None", "None"))
+                    cal = self.calibration_panel
+                    QTimer.singleShot(0, lambda _cal=cal: self._safe_set_reset_shortcut(_cal, "None", "None"))
     
     def _apply_settings_to_fusion_worker(self, cal_prefs):
         """Send all calibration settings to fusion worker at startup."""
@@ -945,30 +1008,28 @@ class PreferencesPanel(QWidget):
             drift_curve = cal_prefs.get('drift_transition_curve', DRIFT_TRANSITION_CURVE)
             safe_queue_put(self.calibration_panel.control_queue, 
                          ('set_drift_curve_type', drift_curve), timeout=QUEUE_PUT_TIMEOUT)
-            print(f"[Preferences] Applied startup drift curve: {drift_curve}")
             
             # Apply alpha values to fusion worker
             if 'alpha_pitch' in cal_prefs:
                 alpha_pitch = float(cal_prefs['alpha_pitch'])
                 safe_queue_put(self.calibration_panel.control_queue, 
                              ('set_alpha_pitch', alpha_pitch), timeout=QUEUE_PUT_TIMEOUT)
-                print(f"[Preferences] Applied startup alpha pitch: {alpha_pitch}")
             
             if 'alpha_roll' in cal_prefs:
                 alpha_roll = float(cal_prefs['alpha_roll'])
                 safe_queue_put(self.calibration_panel.control_queue, 
                              ('set_alpha_roll', alpha_roll), timeout=QUEUE_PUT_TIMEOUT)
-                print(f"[Preferences] Applied startup alpha roll: {alpha_roll}")
             
             # Apply drift correction strength
             if 'drift_correction_strength' in cal_prefs:
                 strength = float(cal_prefs['drift_correction_strength'])
                 safe_queue_put(self.calibration_panel.control_queue, 
                              ('set_drift_correction_strength', strength), timeout=QUEUE_PUT_TIMEOUT)
-                print(f"[Preferences] Applied startup drift correction strength: {strength}")
+            
+            print("[Preferences] Startup settings applied")
                     
         except Exception as e:
-            print(f"[Preferences] Error applying startup settings to fusion worker: {e}")
+            print(f"[Preferences] Error applying startup settings: {e}")
     
     def get_shortcut_preferences(self):
         """Get shortcut preferences for saving."""

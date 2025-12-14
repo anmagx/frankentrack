@@ -22,11 +22,14 @@ class HoldPanelQt(QWidget):
         """
         super().__init__(parent)
         
-        # Blinking state tracking
+        # Animation state tracking (scrolling highlight)
         self._blink_timer = QTimer()
         self._blink_timer.timeout.connect(self._on_blink_timer)
-        self._blink_state = False  # Track blink state (False=normal, True=yellow)
-        self._is_blinking = False  # Track if we should be blinking
+        self._scroll_index = 0
+        self._is_scrolling = False  # Track if animation is active
+        self._direction = 1
+        self._base_text = "- HOLD STILL & UPRIGHT -"
+        self._highlight_width = 5
         
         self.setup_ui()
         
@@ -40,8 +43,8 @@ class HoldPanelQt(QWidget):
         # Add stretch before text to center it
         main_layout.addStretch()
         
-        # HOLD STILL label
-        self.hold_still_label = QLabel("- HOLD STILL & UPRIGHT -")
+        # HOLD STILL label (we'll render per-character HTML for animation)
+        self.hold_still_label = QLabel(self._base_text)
         self.hold_still_label.setAlignment(Qt.AlignCenter)
         
         # Style the text
@@ -50,7 +53,7 @@ class HoldPanelQt(QWidget):
         font.setPointSize(font.pointSize() + 2)  # Larger text for top-level visibility
         self.hold_still_label.setFont(font)
         
-        # Initially hidden/subtle
+        # Initially subtle (static gray text)
         self._set_normal_style()
         
         main_layout.addWidget(self.hold_still_label)
@@ -63,6 +66,7 @@ class HoldPanelQt(QWidget):
         
     def _set_normal_style(self):
         """Set normal (non-blinking) style."""
+        # When not animating we can use a simple stylesheet
         self.hold_still_label.setStyleSheet("color: #666666;")  # Subtle gray
         
     def _set_yellow_style(self):
@@ -70,35 +74,87 @@ class HoldPanelQt(QWidget):
         self.hold_still_label.setStyleSheet("color: #FFD700; font-weight: bold;")  # Bright gold/yellow
         
     def _on_blink_timer(self):
-        """Handle blinking timer for HOLD STILL text."""
-        if not self._is_blinking:
+        """Handle timer ticks and advance the scrolling highlight (bounce side-to-side)."""
+        if not self._is_scrolling:
             return
-            
-        self._blink_state = not self._blink_state
-        if self._blink_state:
-            self._set_yellow_style()
-        else:
-            self._set_normal_style()
+
+        n = len(self._base_text)
+        width = min(self._highlight_width, n)
+        # If text is too short for movement, just render highlight once
+        if n <= width:
+            self._scroll_index = 0
+            self._update_scrolling_text()
+            return
+
+        max_index = n - width
+        # Move and bounce at edges
+        self._scroll_index += self._direction
+        if self._scroll_index >= max_index:
+            self._scroll_index = max_index
+            self._direction = -1
+        elif self._scroll_index <= 0:
+            self._scroll_index = 0
+            self._direction = 1
+
+        self._update_scrolling_text()
+
+    def _escape_char(self, ch: str) -> str:
+        if ch == ' ':
+            return '&nbsp;'
+        if ch == '&':
+            return '&amp;'
+        if ch == '<':
+            return '&lt;'
+        if ch == '>':
+            return '&gt;'
+        return ch
+
+    def _update_scrolling_text(self):
+        """Render the label text as HTML with a single-character highlight that scrolls."""
+        parts = []
+        highlight_color = '#FFD700'
+        normal_color = '#666666'
+        n = len(self._base_text)
+        width = min(self._highlight_width, n)
+        # Build per-character spans so spacing and ampersands are preserved
+        start = self._scroll_index
+        end = start + width
+        for i, ch in enumerate(self._base_text):
+            esc = self._escape_char(ch)
+            if start <= i < end:
+                parts.append(f"<span style=\"color: {highlight_color}; font-weight: bold;\">{esc}</span>")
+            else:
+                parts.append(f"<span style=\"color: {normal_color};\">{esc}</span>")
+
+        # Use rich text; QLabel will render it. Keep font set via setFont.
+        html = ''.join(parts)
+        self.hold_still_label.setText(html)
     
     def start_blinking(self):
-        """Start blinking animation for HOLD STILL text."""
-        if self._is_blinking:
-            return  # Already blinking
-            
-        self._is_blinking = True
-        self._blink_timer.start(250)  # Blink every 500ms
-        self._blink_state = False
+        """Start the scrolling-color animation (keeps old API name)."""
+        if self._is_scrolling:
+            return  # Already running
+
+        self._is_scrolling = True
+        self._scroll_index = 0
+        self._direction = 1
+        # Faster update and 5-char wide highlight
+        self._blink_timer.start(30)  # advance every 30ms
+        # Immediately render current state
+        self._update_scrolling_text()
         
     def stop_blinking(self):
-        """Stop blinking animation and reset to normal color."""
-        if not self._is_blinking:
-            return  # Already stopped
-            
-        self._is_blinking = False
+        """Stop the scrolling-color animation and reset to normal text."""
+        if not self._is_scrolling:
+            return
+
+        self._is_scrolling = False
         self._blink_timer.stop()
-        self._blink_state = False
+        self._scroll_index = 0
+        # Reset to simple plain text to avoid leftover HTML styling
+        self.hold_still_label.setText(self._base_text)
         self._set_normal_style()
         
     def is_blinking(self):
         """Return whether the panel is currently blinking."""
-        return self._is_blinking
+        return self._is_scrolling

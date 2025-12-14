@@ -483,18 +483,18 @@ class CalibrationPanelQt(QGroupBox):
         # Status indicator for gyro calibration
         self.calib_status_label = None
         
-        # Debounce timers for sending drift angle updates
-        self._drift_yaw_send_timer = QTimer()
+        # Debounce timers for sending drift angle updates (parented to this widget)
+        self._drift_yaw_send_timer = QTimer(self)
         self._drift_yaw_send_timer.setSingleShot(True)
         self._drift_yaw_send_timer.timeout.connect(self._apply_drift_angle_yaw)
         self._pending_drift_yaw_value = None
         
-        self._drift_pitch_send_timer = QTimer()
+        self._drift_pitch_send_timer = QTimer(self)
         self._drift_pitch_send_timer.setSingleShot(True)
         self._drift_pitch_send_timer.timeout.connect(self._apply_drift_angle_pitch)
         self._pending_drift_pitch_value = None
         
-        self._drift_roll_send_timer = QTimer()
+        self._drift_roll_send_timer = QTimer(self)
         self._drift_roll_send_timer.setSingleShot(True)
         self._drift_roll_send_timer.timeout.connect(self._apply_drift_angle_roll)
         self._pending_drift_roll_value = None
@@ -507,7 +507,8 @@ class CalibrationPanelQt(QGroupBox):
         
         # Input worker response monitoring
         if self.input_response_queue:
-            self.input_response_timer = QTimer()
+            # Parent the timer to this widget so it is cleaned up by Qt
+            self.input_response_timer = QTimer(self)
             self.input_response_timer.timeout.connect(self._check_input_responses)
             self.input_response_timer.start(50)  # Check every 50ms
         else:
@@ -530,7 +531,15 @@ class CalibrationPanelQt(QGroupBox):
         
         # Send initial drift angle to fusion worker after UI is built
         self._initial_drift_sent = False
-        QTimer.singleShot(100, self._send_initial_drift_angle)
+        # Use a parented single-shot timer to avoid calling a bound method after deletion
+        try:
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(self._send_initial_drift_angle)
+            t.start(100)
+        except Exception:
+            # Fallback to static singleShot if something goes wrong
+            QTimer.singleShot(100, self._send_initial_drift_angle)
 
     def _build_ui(self):
         """Build the calibration panel UI."""
@@ -582,14 +591,8 @@ class CalibrationPanelQt(QGroupBox):
         divider_frame = QFrame()
         divider_frame.setFrameShape(QFrame.HLine)
         divider_frame.setFrameShadow(QFrame.Sunken)
-        divider_frame.setMaximumHeight(2)
-        divider_frame.setStyleSheet("""
-            QFrame {
-                color: #888888;
-                background-color: #888888;
-                border: 1px solid #888888;
-            }
-        """)
+        divider_frame.setObjectName("sectionDivider")
+        divider_frame.setFixedHeight(1)
         main_layout.addWidget(divider_frame)
         
         # Horizontal layout for sliders and visualization
@@ -815,10 +818,12 @@ class CalibrationPanelQt(QGroupBox):
                 safe_queue_put(self.control_queue, ('set_filter', filter_type), timeout=QUEUE_PUT_TIMEOUT)
                 # Only log if not during initialization to prevent startup spam
                 if not getattr(self, '_initializing', False) and self.message_callback:
-                    QTimer.singleShot(0, lambda msg=f"Filter changed to: {filter_type}": self.message_callback(msg))
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda msg=f"Filter changed to: {filter_type}", _cb=cb: _cb(msg))
         except Exception as ex:
             if self.message_callback:
-                QTimer.singleShot(0, lambda msg=f"Failed to set filter to: {filter_type} - {ex}": self.message_callback(msg))
+                cb = self.message_callback
+                QTimer.singleShot(0, lambda msg=f"Failed to set filter to: {filter_type} - {ex}", _cb=cb: _cb(msg))
     
     def _set_reset_shortcut(self, key, display_name):
         """Set the keyboard or gamepad shortcut for reset orientation via input worker."""
@@ -835,15 +840,19 @@ class CalibrationPanelQt(QGroupBox):
         # Register shortcut with input worker
         if self.input_command_queue and key and key != 'None':
             try:
-                print(f"[CalibrationPanel] Sending set_shortcut: {key} ({display_name})")
+                # Only print during non-initialization to reduce startup spam
+                if not getattr(self, '_initializing', False):
+                    print(f"[CalibrationPanel] Sending set_shortcut: {key} ({display_name})")
                 self.input_command_queue.put(('set_shortcut', key, display_name))
                 
                 # Only log if not during initialization to prevent startup spam
                 if not getattr(self, '_initializing', False) and self.message_callback:
-                    QTimer.singleShot(0, lambda: self.message_callback(f"Reset shortcut set to: {display_name}"))
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda _cb=cb, _d=display_name: _cb(f"Reset shortcut set to: {_d}"))
             except Exception as ex:
                 if self.message_callback:
-                    QTimer.singleShot(0, lambda msg=f"Failed to set shortcut: {ex}": self.message_callback(msg))
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda msg=f"Failed to set shortcut: {ex}", _cb=cb: _cb(msg))
         elif self.input_command_queue:
             # Clear any existing shortcut
             try:
@@ -880,18 +889,21 @@ class CalibrationPanelQt(QGroupBox):
         """Handle orientation reset button click."""
         # Send non-destructive orientation reset command to fusion worker
         try:
-            if self.control_queue:
-                if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
-                    if self.message_callback:
-                        QTimer.singleShot(0, lambda: self.message_callback("Failed to send reset command"))
+                    if self.control_queue:
+                        if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
+                            if self.message_callback:
+                                cb = self.message_callback
+                                QTimer.singleShot(0, lambda _cb=cb: _cb("Failed to send reset command"))
                     return
         except Exception as ex:
             if self.message_callback:
-                QTimer.singleShot(0, lambda msg=f"Failed to send reset command: {ex}": self.message_callback(msg))
+                cb = self.message_callback
+                QTimer.singleShot(0, lambda msg=f"Failed to send reset command: {ex}", _cb=cb: _cb(msg))
             return
 
         if self.message_callback:
-            QTimer.singleShot(0, lambda: self.message_callback("Orientation reset requested (from GUI)"))
+            cb = self.message_callback
+            QTimer.singleShot(0, lambda _cb=cb: _cb("Orientation reset requested (from GUI)"))
 
         # Reset translation offsets so displayed X/Y become zero
         try:
@@ -988,6 +1000,9 @@ class CalibrationPanelQt(QGroupBox):
         
         # Set initialization flag to prevent duplicate messages
         self._initializing = True
+        
+        # Mark that initial drift angles have been loaded (prevents duplicate sending)
+        self._initial_drift_sent = True
         
         # Handle new format (separate yaw, pitch, and roll)
         if 'drift_angle_yaw' in prefs and prefs['drift_angle_yaw']:
@@ -1350,7 +1365,26 @@ class CalibrationPanelQt(QGroupBox):
             # Stop response timer if running to avoid calls after widget deletion
             if hasattr(self, 'input_response_timer') and self.input_response_timer:
                 try:
+                    try:
+                        self.input_response_timer.timeout.disconnect()
+                    except Exception:
+                        pass
                     self.input_response_timer.stop()
+                    self.input_response_timer = None
+                except Exception:
+                    pass
+
+            # Stop debounce timers to avoid calling slots after deletion
+            for tname in ('_drift_yaw_send_timer', '_drift_pitch_send_timer', '_drift_roll_send_timer'):
+                try:
+                    timer = getattr(self, tname, None)
+                    if timer:
+                        try:
+                            timer.timeout.disconnect()
+                        except Exception:
+                            pass
+                        timer.stop()
+                        setattr(self, tname, None)
                 except Exception:
                     pass
             
@@ -1364,7 +1398,9 @@ class CalibrationPanelQt(QGroupBox):
                 pass  # Already cleaned up or other error
                     
         except Exception as ex:
+            import traceback
             print(f"Error during cleanup: {ex}")
+            traceback.print_exc()
     
     def closeEvent(self, event):
         """Handle panel close event."""

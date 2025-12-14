@@ -1,5 +1,9 @@
 """
 PyQt managers package for frankentrack.
 
-Contains manager classes that can be shared between tkinter and PyQt implementations.
+Contains manager classes for preferences and configuration.
 """
+
+from .preferences_manager import PreferencesManager
+
+__all__ = ['PreferencesManager']

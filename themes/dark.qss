@@ -231,6 +231,14 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0px;
 }
 
+/* Section dividers */
+QFrame#sectionDivider {
+    background-color: #555555;
+    border: none;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
 /* Semantic status colors */
 QLabel[status="disabled"] {
     color: #888888;

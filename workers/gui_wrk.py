@@ -33,7 +33,7 @@ from workers.gui_qt.panels.diagnostics_panel import DiagnosticsPanelQt
 from workers.gui_qt.panels.hold_panel import HoldPanelQt
 
 from workers.gui_qt.managers.preferences_manager import PreferencesManager
-from workers.gui_qt.managers.icon_helper import set_window_icon
+from workers.gui_qt.helpers.icon_helper import set_window_icon
 from workers.gui_qt.theme_manager import ThemeManager
 
 from config.config import (
@@ -111,8 +111,6 @@ class TabbedGUIWorker(QMainWindow):
         QTimer.singleShot(0, self._finalize_window_size)
         
         self.load_preferences()
-        
-        print("[GUI] PyQt5 tabbed GUI worker initialized")
     
     def setup_ui(self):
         """Setup the main UI with tabbed layout."""
@@ -699,16 +697,57 @@ class TabbedGUIWorker(QMainWindow):
         """Handle window close event."""
         print("[GUI] Close event received")
         
-        # Stop processing timer first
-        if hasattr(self, 'process_timer'):
-            self.process_timer.stop()
-        
+        # Stop running timers to prevent callbacks into deleted widgets
+        for tname in ('update_timer', 'gui_timer', 'process_timer'):
+            try:
+                timer = getattr(self, tname, None)
+                if timer:
+                    timer.stop()
+            except Exception:
+                pass
+
+        # Stop diagnostics panel updates if present
+        try:
+            if hasattr(self, 'diagnostics_panel') and getattr(self.diagnostics_panel, 'plot_timer', None):
+                try:
+                    self.diagnostics_panel.plot_timer.stop()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Cleanup calibration panel resources (threads) before saving preferences
         if hasattr(self.calibration_panel, 'cleanup'):
-            self.calibration_panel.cleanup()
-        
-        # Save preferences before closing
-        self.save_preferences()
+            try:
+                self.calibration_panel.cleanup()
+            except Exception:
+                pass
+
+        # Save preferences before closing (do this while panels still exist)
+        try:
+            self.save_preferences()
+        except Exception:
+            pass
+
+        # Remove cross-panel references to avoid accessing deleted C++ wrappers
+        try:
+            if hasattr(self, 'orientation_panel') and hasattr(self.orientation_panel, 'calibration_panel'):
+                try:
+                    self.orientation_panel.calibration_panel = None
+                except Exception:
+                    pass
+            if hasattr(self, 'preferences_panel') and hasattr(self.preferences_panel, 'calibration_panel'):
+                try:
+                    self.preferences_panel.calibration_panel = None
+                except Exception:
+                    pass
+            # Finally drop our own reference
+            try:
+                self.calibration_panel = None
+            except Exception:
+                pass
+        except Exception:
+            pass
         
         # Give threads time to cleanup
         QApplication.processEvents()
@@ -807,8 +846,6 @@ def start_gui_worker(serial_control_queue, fusion_control_queue,
     if app is None:
         app = QApplication(sys.argv)
     
-    print("[GUI] Starting PyQt5 tabbed GUI worker...")
-    
     # Set application icon
     try:
         icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'img', 'icon.ico'))
@@ -857,7 +894,7 @@ def start_gui_worker(serial_control_queue, fusion_control_queue,
     # Show window
     main_window.show()
     
-    print("[GUI] PyQt5 tabbed GUI started")
+    print("[GUI] Started")
     
     # Run event loop
     app.exec_()

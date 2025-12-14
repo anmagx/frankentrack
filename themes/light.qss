@@ -166,6 +166,14 @@ QTabBar::tab:hover {
     background-color: #d4d4d4;
 }
 
+/* Section dividers */
+QFrame#sectionDivider {
+    background-color: #cccccc;
+    border: none;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
 /* Semantic status colors */
 QLabel[status="disabled"] {
     color: #6c757d;

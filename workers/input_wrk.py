@@ -16,6 +16,9 @@ from config.config import QUEUE_PUT_TIMEOUT
 
 # Try to import pygame for gamepad/joystick support
 try:
+    import os
+    # Suppress pygame welcome message
+    os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
     import pygame
     PYGAME_AVAILABLE = True
 except ImportError:
@@ -55,28 +58,21 @@ class PygameManager:
                 else:
                     return False
                 
-                # Initialize all joysticks once
+                # Initialize all joysticks once (only on first call)
                 joystick_count = pygame.joystick.get_count()
-                print(f"[InputWorker][PygameManager] Detected {joystick_count} joystick(s)")
                 
                 for i in range(joystick_count):
                     try:
                         joy = pygame.joystick.Joystick(i)
                         joy.init()
-                        try:
-                            name = joy.get_name()
-                        except Exception:
-                            name = f"Joystick {i}"
-                        print(f"[InputWorker][PygameManager] Initialized joystick {i}: {name}")
                         self._joysticks.append(joy)
                     except Exception as e:
                         # Skip joysticks that fail to initialize
-                        print(f"[InputWorker][PygameManager] Failed to initialize joystick {i}: {e}")
-                        traceback.print_exc()
                         continue
                 
                 self._initialized = True
-                print(f"[InputWorker][PygameManager] Pygame initialization complete (no display)")
+                if len(self._joysticks) > 0:
+                    print(f"[InputWorker] Initialized {len(self._joysticks)} gamepad(s)")
                     
             if len(self._joysticks) == 0:
                 print(f"[InputWorker][PygameManager] WARNING: No joysticks could be initialized")
@@ -95,21 +91,17 @@ class PygameManager:
         return self._joysticks if self._initialized else []
     
     def cleanup(self):
-        """Clean up pygame resources."""
+        """Clean up pygame resources (does not fully deinitialize - keeps pygame ready for reuse)."""
+        # Don't fully cleanup - just stop using joysticks but keep pygame initialized
+        # This prevents duplicate initialization messages on shortcut changes
         if self._initialized:
             try:
-                for joy in self._joysticks:
-                    if joy.get_init():
-                        joy.quit()
-                self._joysticks = []
-                pygame.joystick.quit()
-                if pygame.get_init():
-                    pygame.quit()
-                print("[InputWorker][PygameManager] Pygame cleaned up")
+                # Note: We don't call quit() on pygame or joysticks anymore
+                # This keeps pygame initialized and avoids duplicate "pygame 2.6.1..." messages
+                # Joysticks will be reused when listener restarts
+                pass
             except Exception as e:
                 print(f"[InputWorker][PygameManager] Error during cleanup: {e}")
-            finally:
-                self._initialized = False
 
 
 class InputWorker:
@@ -250,11 +242,9 @@ class InputWorker:
         if key.startswith('joy'):
             # Gamepad shortcut
             self._start_gamepad_listener()
-            print(f"[InputWorker] Monitoring gamepad shortcut: {display_name}")
         else:
             # Keyboard shortcut
             self._start_keyboard_listener()
-            print(f"[InputWorker] Monitoring keyboard shortcut: {display_name}")
     
     def _clear_shortcut(self):
         """Clear the current shortcut and stop listeners."""
@@ -401,30 +391,17 @@ class InputWorker:
             self.gamepad_thread.join(timeout=0.5)
         
         self.gamepad_thread = None
-        
-        # Cleanup pygame
-        self.pygame_manager.cleanup()
     
     def _gamepad_listener_loop(self):
         """Gamepad listener thread loop."""
         if not PYGAME_AVAILABLE:
             return
         
-        print("[InputWorker] Gamepad listener started")
         joysticks = self.pygame_manager.get_joysticks()
-        print(f"[InputWorker] Gamepad listener: {len(joysticks)} joystick(s) available")
         
         if not joysticks:
-            print("[InputWorker] Gamepad listener: no joysticks detected, exiting")
             self.gamepad_listener_active = False
             return
-        
-        # Log joystick info
-        for i, joy in enumerate(joysticks):
-            try:
-                print(f"[InputWorker] Joystick {i}: {joy.get_name()}, {joy.get_numbuttons()} buttons, {joy.get_numhats()} hats")
-            except Exception as e:
-                print(f"[InputWorker] Joystick {i}: error getting info - {e}")
         
         try:
             check_interval = 1.0 / 30.0  # 30 FPS
@@ -523,8 +500,6 @@ class InputWorker:
         except Exception as e:
             print(f"[InputWorker] Gamepad listener fatal error: {e}")
             traceback.print_exc()
-        finally:
-            print("[InputWorker] Gamepad listener stopped")
     
     def _send_response(self, response):
         """Send a response back to the GUI."""

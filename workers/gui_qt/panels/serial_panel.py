@@ -74,7 +74,7 @@ class SerialPanelQt(BasePanelQt):
         ports = [f"COM{i}" for i in range(100)]  # Same as tkinter
         self.port_combo.addItems(ports)
         self.port_combo.setCurrentText(self._port_value)
-        self.port_combo.setMaximumWidth(70)  # Reduced from 80
+        self.port_combo.setMaximumWidth(100)  # Reduced from 80
         self.port_combo.currentTextChanged.connect(self._on_port_changed)
         layout.addWidget(self.port_combo, 0, 1)
         

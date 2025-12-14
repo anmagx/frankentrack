@@ -517,7 +517,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 <= new_val <= 180.0:  # Sanity check
                             filter.center_threshold_yaw = new_val
                             log_info(logQueue, "Fusion Worker", f"Yaw center threshold updated to {new_val}")
-                            print(f"[Fusion Worker] Yaw center threshold updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid yaw center threshold: {new_val}")
                     except Exception as e:
@@ -528,7 +527,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 <= new_val <= 180.0:  # Sanity check
                             filter.center_threshold_pitch = new_val
                             log_info(logQueue, "Fusion Worker", f"Pitch center threshold updated to {new_val}")
-                            print(f"[Fusion Worker] Pitch center threshold updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid pitch center threshold: {new_val}")
                     except Exception as e:
@@ -539,7 +537,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 <= new_val <= 180.0:  # Sanity check
                             filter.center_threshold_roll = new_val
                             log_info(logQueue, "Fusion Worker", f"Roll center threshold updated to {new_val}")
-                            print(f"[Fusion Worker] Roll center threshold updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid roll center threshold: {new_val}")
                     except Exception as e:
@@ -561,7 +558,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 <= new_val <= 1.0:  # Alpha values must be between 0 and 1
                             filter.alpha_pitch = new_val
                             log_info(logQueue, "Fusion Worker", f"Alpha pitch updated to {new_val}")
-                            print(f"[Fusion Worker] Alpha pitch updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid alpha pitch: {new_val}")
                     except Exception as e:
@@ -572,7 +568,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 <= new_val <= 1.0:  # Alpha values must be between 0 and 1
                             filter.alpha_roll = new_val
                             log_info(logQueue, "Fusion Worker", f"Alpha roll updated to {new_val}")
-                            print(f"[Fusion Worker] Alpha roll updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid alpha roll: {new_val}")
                     except Exception as e:
@@ -583,7 +578,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if new_val > 0.0:  # Drift smoothing time must be positive
                             filter.drift_smoothing_time = new_val
                             log_info(logQueue, "Fusion Worker", f"Drift smoothing time updated to {new_val}")
-                            print(f"[Fusion Worker] Drift smoothing time updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid drift smoothing time: {new_val}")
                     except Exception as e:
@@ -595,7 +589,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if new_val in valid_curves:
                             filter.drift_curve_type = new_val
                             log_info(logQueue, "Fusion Worker", f"Drift curve type updated to {new_val}")
-                            print(f"[Fusion Worker] Drift curve type updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid drift curve type: {new_val}. Valid options: {valid_curves}")
                     except Exception as e:
@@ -606,7 +599,6 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                         if 0.0 < new_val <= 1.0:  # Must be between 0 and 1
                             filter.drift_correction_strength = new_val
                             log_info(logQueue, "Fusion Worker", f"Drift correction strength updated to {new_val}")
-                            print(f"[Fusion Worker] Drift correction strength updated to {new_val}")
                         else:
                             log_warning(logQueue, "Fusion Worker", f"Invalid drift correction strength: {new_val}. Must be between 0.0 and 1.0")
                     except Exception as e:

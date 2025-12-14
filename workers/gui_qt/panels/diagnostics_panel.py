@@ -9,13 +9,23 @@ from PyQt5.QtCore import Qt, QTimer
 import collections
 import time
 
-try:
-    import matplotlib.pyplot as plt
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
+# Lazy import matplotlib - only load when actually needed
+_matplotlib_loaded = False
+_MATPLOTLIB_AVAILABLE = None
+
+def _check_matplotlib():
+    """Check if matplotlib is available (lazy load)."""
+    global _matplotlib_loaded, _MATPLOTLIB_AVAILABLE
+    if not _matplotlib_loaded:
+        _matplotlib_loaded = True
+        try:
+            import matplotlib.pyplot as plt
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            _MATPLOTLIB_AVAILABLE = True
+        except ImportError:
+            _MATPLOTLIB_AVAILABLE = False
+    return _MATPLOTLIB_AVAILABLE
 
 
 class DiagnosticsPanelQt(QGroupBox):
@@ -88,13 +98,17 @@ class DiagnosticsPanelQt(QGroupBox):
     
     def _build_plot_area(self, parent_layout):
         """Build the plotting area with three subplots."""
-        if not MATPLOTLIB_AVAILABLE:
+        if not _check_matplotlib():
             # Show error message if matplotlib not available
             error_label = QLabel("Matplotlib not available. Install with: pip install matplotlib")
             error_label.setStyleSheet("color: red; font-weight: bold;")
             error_label.setAlignment(Qt.AlignCenter)
             parent_layout.addWidget(error_label)
             return
+        
+        # Import matplotlib components now that we need them
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
         
         # Create matplotlib figure with responsive layout handling
         self.figure = Figure(figsize=(4, 2))  # Reduced from (8, 6) for narrower window
@@ -151,14 +165,14 @@ class DiagnosticsPanelQt(QGroupBox):
     
     def _start_diagnostics(self):
         """Start diagnostics mode - show plots and start updating."""
-        if MATPLOTLIB_AVAILABLE and self.canvas:
+        if _MATPLOTLIB_AVAILABLE and self.canvas:
             self.canvas.setVisible(True)
             self.plot_timer.start()
             self._clear_data()  # Clear old data when starting
     
     def _stop_diagnostics(self):
         """Stop diagnostics mode - hide plots and stop updating.""" 
-        if MATPLOTLIB_AVAILABLE and self.canvas:
+        if _MATPLOTLIB_AVAILABLE and self.canvas:
             self.plot_timer.stop()
             self.canvas.setVisible(False)
     
@@ -171,7 +185,7 @@ class DiagnosticsPanelQt(QGroupBox):
     
     def _update_plots(self):
         """Update the matplotlib plots with current data."""
-        if not MATPLOTLIB_AVAILABLE or not self.canvas or not self.is_enabled():
+        if not _MATPLOTLIB_AVAILABLE or not self.canvas or not self.is_enabled():
             return
         
         if len(self.data_times) < 2:
