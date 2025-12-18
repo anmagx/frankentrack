@@ -573,6 +573,7 @@ class CalibrationPanelQt(QGroupBox):
         self.recal_button.setEnabled(False)  # Start disabled until processing is active
         controls_layout.addWidget(self.recal_button)
         
+        
         main_layout.addWidget(controls_frame)
         
         # Second row of controls
@@ -815,6 +816,10 @@ class CalibrationPanelQt(QGroupBox):
                 self.message_callback(f"Gyro bias recalibration requested ({sample_count} samples)")
             else:
                 self.message_callback("Gyro bias recalibration requested")
+
+    def _on_reset_level(self):
+        """Handle reset level (center) button click."""
+        pass
     
     def _on_filter_change(self, filter_type):
         """Send filter selection change to fusion worker via control queue."""
@@ -1326,6 +1331,7 @@ class CalibrationPanelQt(QGroupBox):
         try:
             should_enable = self._processing_active and self._serial_connected
             self.recal_button.setEnabled(should_enable)
+            # Reset Level button removed; no extra controls here
             
             if should_enable:
                 # Remove disabled styling

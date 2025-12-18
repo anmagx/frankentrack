@@ -97,6 +97,9 @@ DRIFT_SMOOTHING_TIME = 2.0           # Time constant for smooth drift correction
 # Number of gyro gz samples to collect at startup for initial bias calibration.
 # Set to 0 to disable startup calibration and rely solely on online estimator.
 GYRO_BIAS_CAL_SAMPLES = 400
+# Number of accel samples to collect for a quick level (pitch/roll) calibration.
+# Level calibration requires far fewer samples than gyro bias; 10-20 is typically enough.
+LEVEL_CAL_SAMPLES = 20
 
 
 

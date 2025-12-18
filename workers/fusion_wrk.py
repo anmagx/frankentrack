@@ -15,6 +15,7 @@ from config.config import (
      ALPHA_ROLL,
      ALPHA_DRIFT_CORRECTION,
         GYRO_BIAS_CAL_SAMPLES,
+    LEVEL_CAL_SAMPLES,
     STATIONARY_GYRO_THRESHOLD,
     STATIONARY_DEBOUNCE_S,
      DT_MIN,
@@ -61,6 +62,13 @@ class QuaternionComplementaryFilter:
         # Keep backward compatibility
         self.center_threshold = center_threshold
         self.gyro_bias_yaw = 0.0
+        # Center offsets (degrees) applied to pitch/roll to correct non-level rest position
+        self.center_offset_pitch = 0.0
+        self.center_offset_roll = 0.0
+        # Allow yaw offset placeholder for completeness
+        self.center_offset_yaw = 0.0
+        # mark if a center offset has been set
+        self.center_calibrated = False
         self.gyro_calibrated = False
         self._stationary_start = None
         self._last_stationary = False
@@ -313,11 +321,12 @@ class QuaternionComplementaryFilter:
             q = self._quat_from_euler(current_yaw, blended_pitch, blended_roll)
         
         # Check if we're looking approximately straight ahead AFTER accel correction
-        # Require ALL axes to be within their respective drift correction thresholds
+        # Compare against configured center offsets so drift correction can operate
+        # when a user-defined rest offset exists.
         yaw_est, pitch_est, roll_est = self._euler_from_quat(q)
-        is_near_center = (_angle_diff_fast(yaw_est, 0) < self.center_threshold_yaw and 
-                         _angle_diff_fast(pitch_est, 0) < self.center_threshold_pitch and
-                         _angle_diff_fast(roll_est, 0) < self.center_threshold_roll)
+        is_near_center = (_angle_diff_fast(yaw_est, self.center_offset_yaw) < self.center_threshold_yaw and 
+                 _angle_diff_fast(pitch_est, self.center_offset_pitch) < self.center_threshold_pitch and
+                 _angle_diff_fast(roll_est, self.center_offset_roll) < self.center_threshold_roll)
         
         # Apply drift correction when stationary and near center
         drift_active = False
@@ -356,14 +365,25 @@ class QuaternionComplementaryFilter:
                 base_rate = dt / self.drift_smoothing_time
                 correction_strength = min(base_rate * (self.drift_correction_strength / 0.3), 1.0)
             
-            # Extract current angles and apply gentle per-frame correction toward zero
-            # This allows user movement to override the correction force
+            # Extract current absolute angles
             current_yaw, current_pitch, current_roll = self._euler_from_quat(q)
-            
-            corrected_yaw = current_yaw * (1.0 - correction_strength)
-            corrected_pitch = current_pitch * (1.0 - correction_strength)
-            corrected_roll = current_roll * (1.0 - correction_strength)
-            
+
+            # Work in the *relative* frame defined by center offsets so drift
+            # correction brings the sensor toward the user-defined rest pose.
+            rel_yaw = normalize_angle(current_yaw - self.center_offset_yaw)
+            rel_pitch = normalize_angle(current_pitch - self.center_offset_pitch)
+            rel_roll = normalize_angle(current_roll - self.center_offset_roll)
+
+            # Apply gentle per-frame correction toward zero in relative frame
+            corrected_rel_yaw = rel_yaw * (1.0 - correction_strength)
+            corrected_rel_pitch = rel_pitch * (1.0 - correction_strength)
+            corrected_rel_roll = rel_roll * (1.0 - correction_strength)
+
+            # Convert back to absolute angles by re-applying center offsets
+            corrected_yaw = normalize_angle(corrected_rel_yaw + self.center_offset_yaw)
+            corrected_pitch = normalize_angle(corrected_rel_pitch + self.center_offset_pitch)
+            corrected_roll = normalize_angle(corrected_rel_roll + self.center_offset_roll)
+
             # Convert corrected Euler angles back to quaternion
             q = self._quat_from_euler(corrected_yaw, corrected_pitch, corrected_roll)
             drift_active = True
@@ -383,6 +403,15 @@ class QuaternionComplementaryFilter:
         yaw = normalize_angle(yaw)
         pitch = normalize_angle(pitch)
         roll = normalize_angle(roll)
+
+        # Apply user/mount center offsets (subtract stored rest offsets)
+        try:
+            yaw = normalize_angle(yaw - self.center_offset_yaw)
+            pitch = normalize_angle(pitch - self.center_offset_pitch)
+            roll = normalize_angle(roll - self.center_offset_roll)
+        except Exception:
+            # In case offsets are not numeric for some reason, ignore
+            pass
 
         return yaw, pitch, roll, drift_active, is_stationary
 
@@ -456,6 +485,13 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                             pass
                     log_info(logQueue, "Fusion Worker", "Orientation reset to zero (preserving calibration)")
                     print("[Fusion Worker] Orientation reset to zero (preserving calibration)")
+                    # Schedule a center-level recalibration to run after reset when the sensor is stationary
+                    try:
+                        filter._pending_center_cal = LEVEL_CAL_SAMPLES
+                        log_info(logQueue, "Fusion Worker", f"Scheduled center recalibration for {LEVEL_CAL_SAMPLES} samples (after recenter)")
+                        print(f"[Fusion Worker] Scheduled center recalibration ({LEVEL_CAL_SAMPLES} samples) (after recenter)")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Failed to schedule center recalibration: {e}")
                 elif cmd == 'reset' or (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'reset'):
                     # Full reset: reset orientation and clear runtime calibration
                     filter.reset()
@@ -670,6 +706,77 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                                 log_warning(logQueue, "Fusion Worker", "Runtime gyro yaw bias recalibration collected 0 samples")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error during runtime gyro bias recalibration: {e}")
+                elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'calibrate_level') or cmd == ('calibrate_level',):
+                    # Runtime center-level recalibration request. Optional second element: number of samples
+                    try:
+                        n_samples = None
+                        if isinstance(cmd, (list, tuple)) and len(cmd) >= 2:
+                            try:
+                                n_samples = int(cmd[1])
+                            except Exception:
+                                n_samples = None
+
+                        if n_samples is None:
+                            n_samples = LEVEL_CAL_SAMPLES
+
+                        if not n_samples or n_samples <= 0:
+                            log_warning(logQueue, "Fusion Worker", f"Level recalibration requested with non-positive sample count: {n_samples}")
+                        else:
+                            log_info(logQueue, "Fusion Worker", f"Recalibrating center level with {n_samples} samples")
+                            print(f"[Fusion Worker] Recalibrating center level ({n_samples} samples)...")
+                            # Notify GUI that calibration is starting
+                            try:
+                                safe_queue_put(statusQueue, ('center_calibrating', True), timeout=QUEUE_PUT_TIMEOUT)
+                            except Exception:
+                                pass
+
+                            roll_samples = []
+                            pitch_samples = []
+                            last_ts = None
+                            while len(roll_samples) < n_samples and not stop_event.is_set():
+                                line = safe_queue_get(serialQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
+                                if line is None:
+                                    continue
+                                try:
+                                    ts, accel, gyro = parse_imu_line(line)
+                                    # Only accept stationary samples: accel near 1g and gyro quiet
+                                    ax, ay, az = accel
+                                    mag = np.sqrt(ax * ax + ay * ay + az * az)
+                                    gyro_mag = np.sqrt(gyro[0] * gyro[0] + gyro[1] * gyro[1] + gyro[2] * gyro[2])
+                                    if mag >= 0.01 and abs(mag - 1.0) < ACCEL_THRESHOLD and gyro_mag < STATIONARY_GYRO_THRESHOLD:
+                                        r, p = filter._accel_to_rp((ax, ay, az))
+                                        roll_samples.append(float(r))
+                                        pitch_samples.append(float(p))
+                                        last_ts = ts
+                                except ValueError:
+                                    continue
+
+                            if len(roll_samples) > 0:
+                                avg_roll = sum(roll_samples) / float(len(roll_samples))
+                                avg_pitch = sum(pitch_samples) / float(len(pitch_samples))
+                                filter.center_offset_roll = avg_roll
+                                filter.center_offset_pitch = avg_pitch
+                                if last_ts is not None:
+                                    filter.last_time = last_ts
+                                # Mark filter as calibrated and notify GUI
+                                filter.center_calibrated = True
+                                try:
+                                    safe_queue_put(statusQueue, ('center_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
+                                    safe_queue_put(statusQueue, ('center_calibrated', True), timeout=QUEUE_PUT_TIMEOUT)
+                                except Exception:
+                                    pass
+                                log_info(logQueue, "Fusion Worker", f"Runtime center level recalibrated from {len(roll_samples)} samples: roll={avg_roll:.3f} pitch={avg_pitch:.3f}")
+                                print(f"[Fusion Worker] Center level recalibrated: roll={avg_roll:.3f} pitch={avg_pitch:.3f}")
+                            else:
+                                filter.center_calibrated = False
+                                try:
+                                    safe_queue_put(statusQueue, ('center_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
+                                    safe_queue_put(statusQueue, ('center_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+                                except Exception:
+                                    pass
+                                log_warning(logQueue, "Fusion Worker", "Runtime center level recalibration collected 0 samples")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error during runtime center level recalibration: {e}")
             
             # Get data from serial queue - drain queue to process most recent data
             line = None
@@ -725,6 +832,75 @@ def run_worker(serialQueue, eulerQueue, eulerDisplayQueue, controlQueue, statusQ
                 
                 # Update filter
                 yaw, pitch, roll, drift_active, is_stationary = filter.update(gyro, accel, timestamp)
+
+                # If a center recalibration was scheduled by a recent recenter, run it now
+                if getattr(filter, '_pending_center_cal', None):
+                    try:
+                        n_samples = int(filter._pending_center_cal)
+                    except Exception:
+                        n_samples = None
+
+                    # Only start calibration when we are stationary to avoid bad samples
+                    if n_samples and is_stationary:
+                        try:
+                            safe_queue_put(statusQueue, ('center_calibrating', True), timeout=QUEUE_PUT_TIMEOUT)
+                        except Exception:
+                            pass
+
+                        roll_samples = []
+                        pitch_samples = []
+                        last_ts = None
+                        while len(roll_samples) < n_samples and not stop_event.is_set():
+                            sline = safe_queue_get(serialQueue, timeout=QUEUE_GET_TIMEOUT, default=None)
+                            if sline is None:
+                                continue
+                            try:
+                                ts, a2, g2 = parse_imu_line(sline)
+                                ax, ay, az = a2
+                                mag = np.sqrt(ax * ax + ay * ay + az * az)
+                                gyro_mag = np.sqrt(g2[0] * g2[0] + g2[1] * g2[1] + g2[2] * g2[2])
+                                if mag >= 0.01 and abs(mag - 1.0) < ACCEL_THRESHOLD and gyro_mag < STATIONARY_GYRO_THRESHOLD:
+                                    r, p = filter._accel_to_rp((ax, ay, az))
+                                    roll_samples.append(float(r))
+                                    pitch_samples.append(float(p))
+                                    last_ts = ts
+                            except ValueError:
+                                continue
+
+                        if len(roll_samples) > 0:
+                            avg_roll = sum(roll_samples) / float(len(roll_samples))
+                            avg_pitch = sum(pitch_samples) / float(len(pitch_samples))
+                            filter.center_offset_roll = avg_roll
+                            filter.center_offset_pitch = avg_pitch
+                            if last_ts is not None:
+                                filter.last_time = last_ts
+                            filter.center_calibrated = True
+                            try:
+                                safe_queue_put(statusQueue, ('center_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
+                                safe_queue_put(statusQueue, ('center_calibrated', True), timeout=QUEUE_PUT_TIMEOUT)
+                            except Exception:
+                                pass
+                            log_info(logQueue, "Fusion Worker", f"Runtime center level recalibrated from {len(roll_samples)} samples (scheduled): roll={avg_roll:.3f} pitch={avg_pitch:.3f}")
+                            print(f"[Fusion Worker] Center level recalibrated (scheduled): roll={avg_roll:.3f} pitch={avg_pitch:.3f}")
+                        else:
+                            filter.center_calibrated = False
+                            try:
+                                safe_queue_put(statusQueue, ('center_calibrating', False), timeout=QUEUE_PUT_TIMEOUT)
+                                safe_queue_put(statusQueue, ('center_calibrated', False), timeout=QUEUE_PUT_TIMEOUT)
+                            except Exception:
+                                pass
+                            log_warning(logQueue, "Fusion Worker", "Scheduled center level recalibration collected 0 samples")
+
+                        # Clear pending flag regardless of success so we don't retry
+                        try:
+                            delattr = setattr  # local alias to avoid lint
+                            delattr(filter, '_pending_center_cal', None)
+                        except Exception:
+                            try:
+                                if hasattr(filter, '_pending_center_cal'):
+                                    del filter._pending_center_cal
+                            except Exception:
+                                pass
                 
                 # Send processing status to UI only when transitioning from inactive to active
                 if not processing_active:
