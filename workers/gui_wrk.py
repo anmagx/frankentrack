@@ -616,7 +616,7 @@ class TabbedGUIWorker(QMainWindow):
             hint = self.centralWidget().sizeHint()
 
         # Small decoration padding to account for window chrome (kept minimal)
-        target_w = max(200, hint.width() + 8)
+        target_w = max(700, hint.width() + 8)  # Increased minimum from 200 to 500
         target_h = max(240, hint.height() + 20)
 
         # Constrain initial width to avoid extremely wide default
