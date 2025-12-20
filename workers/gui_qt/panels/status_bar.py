@@ -62,18 +62,15 @@ class StatusBarQt(QGroupBox):
         self.send_rate_value.setMinimumWidth(65)  # Similar to tkinter width=12
         self.send_rate_value.setAlignment(Qt.AlignVCenter)
         layout.addWidget(self.send_rate_value)
-        
-        """
-        # Camera FPS (same as tkinter)
+        # Camera FPS (reactivated)
         camera_fps_label = QLabel("Camera FPS:")
         camera_fps_label.setAlignment(Qt.AlignVCenter)
         layout.addWidget(camera_fps_label)
-        
+
         self.camera_fps_value = QLabel(self._camera_fps_text)
-        self.camera_fps_value.setMinimumWidth(65)  # Similar to tkinter width=12
+        self.camera_fps_value.setMinimumWidth(65)
         self.camera_fps_value.setAlignment(Qt.AlignVCenter)
         layout.addWidget(self.camera_fps_value)
-        """
         
         # Spacer to fill remaining space and push device status to the right
         spacer = QSpacerItem(0, 20, QSizePolicy.Expanding, QSizePolicy.Fixed)

@@ -92,24 +92,31 @@ def run_worker(eulerQueue, translationQueue, stop_event, udp_ip=None, udp_port=N
                 yaw, pitch, roll = float(sendData[0]), float(sendData[1]), float(sendData[2])
 
                 # Try to get latest translation from translationQueue (non-blocking).
-                # Drain any queued translations and keep the newest sample. If none
+                # Drain any queued translations and keep the newest numeric sample. If none
                 # are currently available, reuse the last_translation until it
                 # becomes stale (STALE_DETECTION_TIMEOUT). This avoids flip-flopping to zeros
                 # during brief queue scheduling races.
                 tx, ty, tz = last_translation
                 try:
                     latest = None
+                    # Drain translationQueue but skip control tuples (strings)
                     while True:
                         t = safe_queue_get(translationQueue, timeout=0.0, default=None)
                         if t is None:
                             break
+                        # ignore control tuples injected by camera worker
+                        if isinstance(t, (list, tuple)) and len(t) >= 1 and isinstance(t[0], str):
+                            continue
                         latest = t
-                    
+
                     if latest is not None and len(latest) >= 3:
                         # update last-seen translation and timestamp
-                        tx, ty, tz = float(latest[0]), float(latest[1]), float(latest[2])
-                        last_translation = (tx, ty, tz)
-                        last_translation_time = time.time()
+                        try:
+                            tx, ty, tz = float(latest[0]), float(latest[1]), float(latest[2])
+                            last_translation = (tx, ty, tz)
+                            last_translation_time = time.time()
+                        except Exception:
+                            pass
                     else:
                         # if we have a last_translation but it's stale, fall back to zeros
                         if last_translation_time and (time.time() - last_translation_time) > local_stale:

@@ -898,33 +898,101 @@ class CalibrationPanelQt(QGroupBox):
     
     def _on_reset_orientation(self):
         """Handle orientation reset button click."""
-        # Send non-destructive orientation reset command to fusion worker
+        # First: request the camera worker to latch the current pixel as camera-local origin
+        # so subsequent position outputs are relative to that point.
         try:
-                    if self.control_queue:
-                        if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
-                            if self.message_callback:
-                                cb = self.message_callback
-                                QTimer.singleShot(0, lambda _cb=cb: _cb("Failed to send reset command"))
-                    return
-        except Exception as ex:
-            if self.message_callback:
-                cb = self.message_callback
-                QTimer.singleShot(0, lambda msg=f"Failed to send reset command: {ex}", _cb=cb: _cb(msg))
-            return
+            parent = self.parent()
+            camera_cqs = []
+            if parent is not None:
+                for child in parent.findChildren(QWidget):
+                    try:
+                        if hasattr(child, 'control_queue') and hasattr(child, 'track_btn'):
+                            cq = getattr(child, 'control_queue', None)
+                            if cq is not None:
+                                camera_cqs.append(cq)
+                    except Exception:
+                        pass
+            # Send latch request to all discovered camera control queues
+            for cq in camera_cqs:
+                try:
+                    safe_queue_put(cq, ('latch_origin',), timeout=QUEUE_PUT_TIMEOUT)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # If a direct camera control queue or panel reference was provided by the GUI host,
+        # use it so we can affect the camera tab even when it's in a different parent widget.
+        try:
+            if hasattr(self, 'camera_control_queue') and getattr(self, 'camera_control_queue') is not None:
+                try:
+                    safe_queue_put(self.camera_control_queue, ('latch_origin',), timeout=QUEUE_PUT_TIMEOUT)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Schedule fusion reset shortly after camera latch so fusion can observe the
+        # freshest translation sample and set its own origin accordingly.
+        def _send_fusion_reset():
+            try:
+                if self.control_queue:
+                    if not safe_queue_put(self.control_queue, 'reset_orientation', timeout=QUEUE_PUT_TIMEOUT):
+                        if self.message_callback:
+                            cb = self.message_callback
+                            QTimer.singleShot(0, lambda _cb=cb: _cb("Failed to send reset command"))
+                        return
+                    if self.message_callback:
+                        cb = self.message_callback
+                        QTimer.singleShot(0, lambda _cb=cb: _cb("Orientation reset requested (from GUI)"))
+            except Exception as ex:
+                if self.message_callback:
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda msg=f"Failed to send reset command: {ex}", _cb=cb: _cb(msg))
+        # 100ms delay to allow camera worker to publish its latched sample
+        QTimer.singleShot(100, _send_fusion_reset)
+
+        # Reset displayed position (X,Y,Z) to zero in other panels.
+        # Try to find sibling OrientationPanel and CameraPanel within the same parent
+        parent = self.parent()
+        if parent is not None:
+            for child in parent.findChildren(QWidget):
+                try:
+                    # Orientation panel: clear internal offsets if supported
+                    if hasattr(child, 'reset_position_offsets') and callable(getattr(child, 'reset_position_offsets')):
+                        try:
+                            child.reset_position_offsets()
+                        except Exception:
+                            pass
+
+                    # Any panel that displays position: update its display to zero
+                    if hasattr(child, 'update_position') and callable(getattr(child, 'update_position')):
+                        try:
+                            child.update_position(0.0, 0.0, 0.0)
+                        except Exception:
+                            pass
+
+                    # Camera latch already requested above; here we only reset displays
+                except Exception:
+                    pass
 
         if self.message_callback:
-            cb = self.message_callback
-            QTimer.singleShot(0, lambda _cb=cb: _cb("Orientation reset requested (from GUI)"))
-
-        # Reset translation offsets so displayed X/Y become zero
+            QTimer.singleShot(0, lambda: self.message_callback("Position displays reset to 0,0,0"))
+        # Also update the CameraPanel UI directly if a reference was provided by the GUI host
         try:
-            lx, ly, lz = self._last_raw_translation
-            # Set offsets so displayed values = raw - offset = 0
-            self._x_offset = float(lx)
-            self._y_offset = float(ly)
-            
-            if self.message_callback:
-                QTimer.singleShot(0, lambda: self.message_callback("Position offsets updated to make current position zero"))
+            if hasattr(self, 'camera_panel') and self.camera_panel is not None:
+                try:
+                    if hasattr(self.camera_panel, 'update_position'):
+                        self.camera_panel.update_position(0.0, 0.0, 0.0)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self.camera_panel, 'update_pixel_position'):
+                        self.camera_panel.update_pixel_position(0, 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         except Exception:
             pass
 
