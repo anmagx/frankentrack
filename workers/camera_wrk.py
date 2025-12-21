@@ -487,10 +487,6 @@ def tracking_thread(translationQueue, translationDisplayQueue, stop_event, statu
                             _last_pub_ts = now_pub
                             _last_pub_x = float(send_x)
                             _last_pub_y = float(send_y)
-                            try:
-                                log_info(logQueue, "Camera Worker", f"Published translation: {tdata}")
-                            except Exception:
-                                pass
                         else:
                             try:
                                 log_info(logQueue, "Camera Worker", f"Failed to publish translation (queue full?): {tdata}")
