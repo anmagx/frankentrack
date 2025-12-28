@@ -68,6 +68,11 @@ class PreferencesPanel(QWidget):
         # Gyro calibration parameters
         self.gyro_bias_cal_samples = GYRO_BIAS_CAL_SAMPLES
         
+        # Axis inversion settings for sensor configuration
+        self.invert_yaw = False
+        self.invert_pitch = False
+        self.invert_roll = False
+        
         # Debounce timers for alpha updates
         self._alpha_pitch_timer = QTimer()
         self._alpha_pitch_timer.setSingleShot(True)
@@ -167,6 +172,42 @@ class PreferencesPanel(QWidget):
         shortcuts_layout.addLayout(reset_layout)
         shortcuts_group.setLayout(shortcuts_layout)
         layout.addWidget(shortcuts_group)
+        
+        # Sensor configuration group
+        sensor_group = QGroupBox("Sensor Configuration")
+        sensor_layout = QVBoxLayout()
+        sensor_layout.setSpacing(8)
+        
+        # Axis inversion checkboxes
+        inversion_header = QLabel("Axis Inversions (adjust for sensor mounting)")
+        inversion_header.setStyleSheet("font-weight: 600; margin-bottom: 6px;")
+        sensor_layout.addWidget(inversion_header)
+        
+        from PyQt5.QtWidgets import QCheckBox
+        
+        self.invert_yaw_checkbox = QCheckBox("Invert Yaw")
+        self.invert_yaw_checkbox.setChecked(self.invert_yaw)
+        self.invert_yaw_checkbox.stateChanged.connect(self._on_invert_yaw_changed)
+        sensor_layout.addWidget(self.invert_yaw_checkbox)
+        
+        self.invert_pitch_checkbox = QCheckBox("Invert Pitch")
+        self.invert_pitch_checkbox.setChecked(self.invert_pitch)
+        self.invert_pitch_checkbox.stateChanged.connect(self._on_invert_pitch_changed)
+        sensor_layout.addWidget(self.invert_pitch_checkbox)
+        
+        self.invert_roll_checkbox = QCheckBox("Invert Roll")
+        self.invert_roll_checkbox.setChecked(self.invert_roll)
+        self.invert_roll_checkbox.stateChanged.connect(self._on_invert_roll_changed)
+        sensor_layout.addWidget(self.invert_roll_checkbox)
+        
+        # Add info label for sensor configuration
+        sensor_info_label = QLabel("Enable inversions if your sensor orientation differs from the expected arrangement")
+        sensor_info_label.setStyleSheet("color: #666666; font-size: 10px;")
+        sensor_info_label.setWordWrap(True)
+        sensor_layout.addWidget(sensor_info_label)
+        
+        sensor_group.setLayout(sensor_layout)
+        layout.addWidget(sensor_group)
         
         # Drift correction group
         drift_group = QGroupBox("Drift Correction")
@@ -421,6 +462,8 @@ class PreferencesPanel(QWidget):
         self._load_drift_settings(cal_prefs)
         self._load_gyro_settings(cal_prefs)
         self._load_shortcut_settings(cal_prefs)
+        self._load_sensor_settings(cal_prefs)
+        self._load_sensor_settings(cal_prefs)
         
         # Send settings to fusion worker
         self._apply_settings_to_fusion_worker(cal_prefs)
@@ -652,6 +695,60 @@ class PreferencesPanel(QWidget):
         # Note: This affects next recalibration, not current session
         self._trigger_preference_save()
     
+    def _on_invert_yaw_changed(self, state):
+        """Handle yaw inversion checkbox change."""
+        self.invert_yaw = (state == 2)  # Qt.Checked == 2
+        
+        # Send command to fusion worker for live update
+        if hasattr(self.calibration_panel, 'control_queue'):
+            try:
+                control_queue = self.calibration_panel.control_queue
+                if control_queue and not control_queue.full():
+                    safe_queue_put(control_queue, ('set_invert_yaw', self.invert_yaw), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception as e:
+                print(f"[Preferences] Failed to send yaw inversion command: {e}")
+        
+        # Also update visualization immediately
+        if self.calibration_panel:
+            self.calibration_panel.set_invert_yaw(self.invert_yaw)
+        self._trigger_preference_save()
+    
+    def _on_invert_pitch_changed(self, state):
+        """Handle pitch inversion checkbox change."""
+        self.invert_pitch = (state == 2)  # Qt.Checked == 2
+        
+        # Send command to fusion worker for live update
+        if hasattr(self.calibration_panel, 'control_queue'):
+            try:
+                control_queue = self.calibration_panel.control_queue
+                if control_queue and not control_queue.full():
+                    safe_queue_put(control_queue, ('set_invert_pitch', self.invert_pitch), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception as e:
+                print(f"[Preferences] Failed to send pitch inversion command: {e}")
+        
+        # Also update visualization immediately
+        if self.calibration_panel:
+            self.calibration_panel.set_invert_pitch(self.invert_pitch)
+        self._trigger_preference_save()
+    
+    def _on_invert_roll_changed(self, state):
+        """Handle roll inversion checkbox change."""
+        self.invert_roll = (state == 2)  # Qt.Checked == 2
+        
+        # Send command to fusion worker for live update
+        if hasattr(self.calibration_panel, 'control_queue'):
+            try:
+                control_queue = self.calibration_panel.control_queue
+                if control_queue and not control_queue.full():
+                    safe_queue_put(control_queue, ('set_invert_roll', self.invert_roll), timeout=QUEUE_PUT_TIMEOUT)
+            except Exception as e:
+                print(f"[Preferences] Failed to send roll inversion command: {e}")
+        
+        # Also update visualization immediately
+        if self.calibration_panel:
+            self.calibration_panel.set_invert_roll(self.invert_roll)
+        self._trigger_preference_save()
+    
     def _apply_drift_smoothing(self):
         """Apply drift smoothing time to fusion worker (debounced)."""
         if self._pending_drift_smoothing is not None and self.calibration_panel:
@@ -725,6 +822,22 @@ class PreferencesPanel(QWidget):
         
         # Reset gyro calibration parameters to defaults
         self.gyro_bias_cal_samples = GYRO_BIAS_CAL_SAMPLES
+        
+        # Reset axis inversions to defaults
+        self.invert_yaw = False
+        self.invert_pitch = False
+        self.invert_roll = False
+        
+        # Update checkboxes
+        self.invert_yaw_checkbox.setChecked(self.invert_yaw)
+        self.invert_pitch_checkbox.setChecked(self.invert_pitch)
+        self.invert_roll_checkbox.setChecked(self.invert_roll)
+        
+        # Apply to calibration panel
+        if self.calibration_panel:
+            self.calibration_panel.set_invert_yaw(self.invert_yaw)
+            self.calibration_panel.set_invert_pitch(self.invert_pitch)
+            self.calibration_panel.set_invert_roll(self.invert_roll)
         
         # Update sliders and labels
         self.alpha_pitch_slider.setValue(int(self.alpha_pitch * 1000))
@@ -1014,6 +1127,25 @@ class PreferencesPanel(QWidget):
                     cal = self.calibration_panel
                     QTimer.singleShot(0, lambda _cal=cal: self._safe_set_reset_shortcut(_cal, "None", "None"))
     
+    def _load_sensor_settings(self, cal_prefs):
+        """Load sensor configuration settings from preferences."""
+        # Convert string boolean values to actual booleans
+        def to_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ('true', '1', 'yes')
+            return bool(value)
+        
+        self.invert_yaw = to_bool(cal_prefs.get('invert_yaw', False))
+        self.invert_pitch = to_bool(cal_prefs.get('invert_pitch', False))
+        self.invert_roll = to_bool(cal_prefs.get('invert_roll', False))
+        
+        # Update UI
+        self.invert_yaw_checkbox.setChecked(self.invert_yaw)
+        self.invert_pitch_checkbox.setChecked(self.invert_pitch)
+        self.invert_roll_checkbox.setChecked(self.invert_roll)
+    
     def _apply_settings_to_fusion_worker(self, cal_prefs):
         """Send all calibration settings to fusion worker at startup."""
         if not (hasattr(self.calibration_panel, 'control_queue') and self.calibration_panel.control_queue):
@@ -1051,6 +1183,23 @@ class PreferencesPanel(QWidget):
                     
         except Exception as e:
             print(f"[Preferences] Error applying startup settings: {e}")
+        
+        # Apply axis inversions to calibration panel visualization
+        if self.calibration_panel:
+            self.calibration_panel.set_invert_yaw(self.invert_yaw)
+            self.calibration_panel.set_invert_pitch(self.invert_pitch)
+            self.calibration_panel.set_invert_roll(self.invert_roll)
+        
+        # Send axis inversions to fusion worker
+        try:
+            safe_queue_put(self.calibration_panel.control_queue, 
+                         ('set_invert_yaw', self.invert_yaw), timeout=QUEUE_PUT_TIMEOUT)
+            safe_queue_put(self.calibration_panel.control_queue, 
+                         ('set_invert_pitch', self.invert_pitch), timeout=QUEUE_PUT_TIMEOUT)
+            safe_queue_put(self.calibration_panel.control_queue, 
+                         ('set_invert_roll', self.invert_roll), timeout=QUEUE_PUT_TIMEOUT)
+        except Exception as e:
+            print(f"[Preferences] Error applying axis inversions to fusion worker: {e}")
     
     def get_shortcut_preferences(self):
         """Get shortcut preferences for saving."""
@@ -1064,7 +1213,10 @@ class PreferencesPanel(QWidget):
             'drift_smoothing_time': f"{self.drift_smoothing_time:.1f}",
             'drift_correction_strength': f"{self.drift_correction_strength:.2f}",
             'drift_transition_curve': self.drift_transition_curve,
-            'gyro_bias_cal_samples': str(self.gyro_bias_cal_samples)
+            'gyro_bias_cal_samples': str(self.gyro_bias_cal_samples),
+            'invert_yaw': self.invert_yaw,
+            'invert_pitch': self.invert_pitch,
+            'invert_roll': self.invert_roll
         }
     
 

@@ -209,6 +209,11 @@ class OrientationVisualizationWidget(QWidget):
         self.drift_angle_pitch = 5.0  # Default pitch drift angle in degrees
         self.drift_angle_roll = 5.0  # Default roll drift angle in degrees
         
+        # Axis inversion settings
+        self.invert_yaw = False
+        self.invert_pitch = False
+        self.invert_roll = False
+        
         # Widget appearance
         self.setStyleSheet("background-color: black; border: 1px solid gray;")
     
@@ -264,6 +269,36 @@ class OrientationVisualizationWidget(QWidget):
             angle: Roll drift angle in degrees
         """
         self.drift_angle_roll = float(angle)
+        self.update()  # Trigger repaint
+    
+    def set_invert_yaw(self, invert):
+        """
+        Set yaw axis inversion.
+        
+        Args:
+            invert: Boolean indicating if yaw should be inverted
+        """
+        self.invert_yaw = bool(invert)
+        self.update()  # Trigger repaint
+    
+    def set_invert_pitch(self, invert):
+        """
+        Set pitch axis inversion.
+        
+        Args:
+            invert: Boolean indicating if pitch should be inverted
+        """
+        self.invert_pitch = bool(invert)
+        self.update()  # Trigger repaint
+    
+    def set_invert_roll(self, invert):
+        """
+        Set roll axis inversion.
+        
+        Args:
+            invert: Boolean indicating if roll should be inverted
+        """
+        self.invert_roll = bool(invert)
         self.update()  # Trigger repaint
 
     def paintEvent(self, event):
@@ -371,9 +406,10 @@ class OrientationVisualizationWidget(QWidget):
         # Get current range from config (allows dynamic updates)
         current_range = VISUALIZATION_RANGE
         
+        # Data is already inverted by fusion worker, so just use it directly
         # Calculate position based on pitch/yaw
         # Yaw maps to X axis, Pitch maps to Y axis
-        yaw_ratio = max(-1.0, min(1.0, -self.yaw / current_range))  # Negate yaw
+        yaw_ratio = max(-1.0, min(1.0, -self.yaw / current_range))  # Negate yaw for display
         pitch_ratio = max(-1.0, min(1.0, self.pitch / current_range))
         
         indicator_x = center_x + yaw_ratio * (width // 2 - 10)
@@ -1429,6 +1465,21 @@ class CalibrationPanelQt(QGroupBox):
     def connect_preferences_panel(self, preferences_panel):
         """Connect to preferences panel to access configuration values."""
         self.preferences_panel = preferences_panel
+    
+    def set_invert_yaw(self, invert):
+        """Set yaw axis inversion for visualization."""
+        if self.visualization_widget:
+            self.visualization_widget.set_invert_yaw(invert)
+    
+    def set_invert_pitch(self, invert):
+        """Set pitch axis inversion for visualization."""
+        if self.visualization_widget:
+            self.visualization_widget.set_invert_pitch(invert)
+    
+    def set_invert_roll(self, invert):
+        """Set roll axis inversion for visualization."""
+        if self.visualization_widget:
+            self.visualization_widget.set_invert_roll(invert)
     
     def cleanup(self):
         """Clean up threads and resources when the panel is destroyed."""

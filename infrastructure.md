@@ -42,32 +42,32 @@ Frankentrack uses a **process-based parallelism** approach rather than threading
 ### High-Level Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Main Process                                │
-│                   (frankentrack.py)                              │
-│                                                                   │
+┌────────────────────────────────────────────────────────────────┐
+│                      Main Process                              │
+│                   (frankentrack.py)                            │
+│                                                                │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │            ProcessHandler                                 │  │
-│  │  - Creates all queues                                     │  │
-│  │  - Starts worker processes                                │  │
-│  │  - Manages shutdown                                       │  │
-│  │  - Runs log writer thread                                 │  │
-│  │  - Monitors worker health                                 │  │
+│  │            ProcessHandler                                │  │
+│  │  - Creates all queues                                    │  │
+│  │  - Starts worker processes                               │  │
+│  │  - Manages shutdown                                      │  │
+│  │  - Runs log writer thread                                │  │
+│  │  - Monitors worker health                                │  │
 │  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         │                     │                     │
         ▼                     ▼                     ▼
 ┌──────────────┐      ┌──────────────┐     ┌──────────────┐
 │ Serial       │      │ Fusion       │     │ UDP          │
-│ Worker       │─────▶│ Worker       │────▶│ Worker       │
+│ Worker       │─────▶│ Worker       │────▶│ Worker      │
 │ Process      │      │ Process      │     │ Process      │
 └──────────────┘      └──────────────┘     └──────────────┘
-        │                     │                     │
-        ▼                     ▼                     │
+        │                     │                    │
+        ▼                     ▼                    │
 ┌──────────────┐      ┌──────────────┐             │
-│ Input        │      │ GUI          │◀────────────┘
+│ Input        │      │ GUI          │◀───────────┘
 │ Worker       │      │ Worker       │
 │ Process      │      │ Process      │
 └──────────────┘      └──────────────┘

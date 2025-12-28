@@ -76,6 +76,10 @@ class QuaternionComplementaryFilter:
         self._drift_correction_start = None
         self._gyro_stationary_threshold = STATIONARY_GYRO_THRESHOLD
         self._stationary_debounce_s = STATIONARY_DEBOUNCE_S
+        # Axis inversion settings
+        self.invert_yaw = False
+        self.invert_pitch = False
+        self.invert_roll = False
         # Quaternion as [w, x, y, z]
         self.q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
         self.last_time = None
@@ -751,6 +755,27 @@ def run_worker(serialQueue, translationQueue, eulerQueue, eulerDisplayQueue, con
                             log_warning(logQueue, "Fusion Worker", f"Invalid drift correction strength: {new_val}. Must be between 0.0 and 1.0")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting drift correction strength: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_invert_yaw':
+                    try:
+                        filter.invert_yaw = bool(cmd[1])
+                        log_info(logQueue, "Fusion Worker", f"Yaw inversion set to {filter.invert_yaw}")
+                        print(f"[Fusion Worker] Yaw inversion set to {filter.invert_yaw}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting yaw inversion: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_invert_pitch':
+                    try:
+                        filter.invert_pitch = bool(cmd[1])
+                        log_info(logQueue, "Fusion Worker", f"Pitch inversion set to {filter.invert_pitch}")
+                        print(f"[Fusion Worker] Pitch inversion set to {filter.invert_pitch}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting pitch inversion: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_invert_roll':
+                    try:
+                        filter.invert_roll = bool(cmd[1])
+                        log_info(logQueue, "Fusion Worker", f"Roll inversion set to {filter.invert_roll}")
+                        print(f"[Fusion Worker] Roll inversion set to {filter.invert_roll}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting roll inversion: {e}")
                 elif (isinstance(cmd, (list, tuple)) and len(cmd) >= 1 and cmd[0] == 'recalibrate_gyro_bias') or cmd == ('recalibrate_gyro_bias',):
                     # Runtime recalibration request. Optional second element: number of samples
                     try:
@@ -1140,9 +1165,14 @@ def run_worker(serialQueue, translationQueue, eulerQueue, eulerDisplayQueue, con
                         # On any error, keep previous values
                         pass
 
+                # Apply axis inversions if configured
+                output_yaw = -yaw if filter.invert_yaw else yaw
+                output_pitch = -pitch if filter.invert_pitch else pitch
+                output_roll = -roll if filter.invert_roll else roll
+                
                 # Put Euler angles into output queues
                 # Format: [Yaw, Pitch, Roll, X, Y, Z]
-                euler_data = [yaw, pitch, roll, x, y, z]
+                euler_data = [output_yaw, output_pitch, output_roll, x, y, z]
 
                 # Publish to main euler queue (for UDP) - non-blocking for real-time
                 try:
