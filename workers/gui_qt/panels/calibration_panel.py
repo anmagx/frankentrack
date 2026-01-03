@@ -516,6 +516,11 @@ class CalibrationPanelQt(QGroupBox):
         self.drift_angle_pitch_label = None
         self.drift_angle_roll_label = None
         
+        # Store previous drift values for disengage feature
+        self.stored_drift_yaw = DEFAULT_CENTER_THRESHOLD
+        self.stored_drift_pitch = DEFAULT_CENTER_THRESHOLD
+        self.stored_drift_roll = DEFAULT_CENTER_THRESHOLD
+        
         # Status indicator for gyro calibration
         self.calib_status_label = None
         
@@ -554,6 +559,12 @@ class CalibrationPanelQt(QGroupBox):
         self.reset_shortcut = "None"
         self.reset_shortcut_display_name = "None"
         self.reset_button = None
+        
+        # Disengage drift correction controls
+        self.disengage_shortcut = "None"
+        self.disengage_shortcut_display_name = "None"
+        self.disengage_toggle_mode = False  # False = hold, True = toggle
+        self.disengage_toggled_on = False  # Track toggle state
         
         # Position offset tracking (for reset functionality)
         self._x_offset = 0.0
@@ -713,6 +724,29 @@ class CalibrationPanelQt(QGroupBox):
         
         sliders_layout.addLayout(roll_layout)
         
+        # Add disengage button
+        disengage_layout = QHBoxLayout()
+        disengage_layout.setContentsMargins(0, 8, 0, 0)  # Add top margin for spacing
+        self.disengage_btn = QPushButton("Disengage Drift Correction")
+        self.disengage_btn.setCheckable(True)  # Makes it a toggle button
+        self.disengage_btn.setToolTip("Hold to temporarily disable drift correction")
+        
+        # Set fixed size to prevent size changes when text becomes bold
+        # Calculate dimensions based on the longer text variant with bold font
+        from PyQt5.QtGui import QFontMetrics, QFont
+        bold_font = QFont(self.disengage_btn.font())
+        bold_font.setBold(True)
+        fm = QFontMetrics(bold_font)
+        text_width = fm.horizontalAdvance("🔴 Drift Correction DISENGAGED")
+        text_height = fm.height()
+        self.disengage_btn.setFixedHeight(text_height + 16)  # Add padding for button chrome
+        self.disengage_btn.setMinimumWidth(text_width + 30)  # Add padding for button chrome
+        
+        self.disengage_btn.pressed.connect(self._on_disengage_pressed)
+        self.disengage_btn.released.connect(self._on_disengage_released)
+        disengage_layout.addWidget(self.disengage_btn)
+        sliders_layout.addLayout(disengage_layout)
+        
         # Add sliders frame to horizontal layout
         sliders_viz_layout.addWidget(sliders_frame, stretch=1)
         
@@ -759,6 +793,10 @@ class CalibrationPanelQt(QGroupBox):
         # Update visualization widget immediately
         if self.visualization_widget:
             self.visualization_widget.update_drift_angle_yaw(vq)
+        
+        # Update stored value if not disengaged
+        if not self.disengage_btn.isChecked():
+            self.stored_drift_yaw = vq
 
         # Store the value for debounced sending
         self._pending_drift_yaw_value = vq
@@ -783,6 +821,10 @@ class CalibrationPanelQt(QGroupBox):
         # Update visualization widget immediately
         if self.visualization_widget:
             self.visualization_widget.update_drift_angle_pitch(vq)
+        
+        # Update stored value if not disengaged
+        if not self.disengage_btn.isChecked():
+            self.stored_drift_pitch = vq
 
         # Store the value for debounced sending
         self._pending_drift_pitch_value = vq
@@ -807,6 +849,10 @@ class CalibrationPanelQt(QGroupBox):
         # Update visualization widget immediately
         if self.visualization_widget:
             self.visualization_widget.update_drift_angle_roll(vq)
+        
+        # Update stored value if not disengaged
+        if not self.disengage_btn.isChecked():
+            self.stored_drift_roll = vq
 
         # Store the value for debounced sending
         self._pending_drift_roll_value = vq
@@ -815,6 +861,68 @@ class CalibrationPanelQt(QGroupBox):
         self._drift_roll_send_timer.stop()
         self._drift_roll_send_timer.start(THRESH_DEBOUNCE_MS)
 
+    def _on_disengage_pressed(self):
+        """Called when disengage button is pressed - disable drift correction."""
+        # In toggle mode, toggle the state
+        if self.disengage_toggle_mode:
+            if self.disengage_toggled_on:
+                # Already on, turn it off
+                self._disengage_off()
+            else:
+                # Turn it on
+                self._disengage_on()
+        else:
+            # Hold mode - engage immediately
+            self._disengage_on()
+    
+    def _disengage_on(self):
+        """Enable drift correction disengagement."""
+        # Store current drift values from sliders
+        self.stored_drift_yaw = self.drift_angle_yaw_value
+        self.stored_drift_pitch = self.drift_angle_pitch_value
+        self.stored_drift_roll = self.drift_angle_roll_value
+        
+        # Set drift correction to 0,0,0 (effectively disabling it)
+        if self.control_queue:
+            safe_queue_put(self.control_queue, ('set_threshold', 0.0, 0.0, 0.0), timeout=QUEUE_PUT_TIMEOUT)
+        
+        # Visual feedback
+        self.disengage_btn.setText("🔴 Drift Correction DISENGAGED")
+        self.disengage_btn.setStyleSheet("background-color: #ff4444; color: white; font-weight: bold;")
+        
+        # Track toggle state
+        self.disengage_toggled_on = True
+        
+        if self.message_callback:
+            self.message_callback("Drift correction temporarily disabled")
+    
+    def _disengage_off(self):
+        """Disable drift correction disengagement (restore drift correction)."""
+        # Restore previous drift values
+        if self.control_queue:
+            safe_queue_put(self.control_queue, 
+                          ('set_threshold', self.stored_drift_yaw, self.stored_drift_pitch, self.stored_drift_roll), 
+                          timeout=QUEUE_PUT_TIMEOUT)
+        
+        # Restore visual appearance - preserve shortcut name if set
+        if self.disengage_shortcut and self.disengage_shortcut != 'None':
+            self.disengage_btn.setText(f"Disengage Drift Correction ({self.disengage_shortcut_display_name})")
+        else:
+            self.disengage_btn.setText("Disengage Drift Correction")
+        self.disengage_btn.setStyleSheet("")
+        
+        # Track toggle state
+        self.disengage_toggled_on = False
+        
+        if self.message_callback:
+            self.message_callback(f"Drift correction re-enabled: Yaw={self.stored_drift_yaw:.1f}° Pitch={self.stored_drift_pitch:.1f}° Roll={self.stored_drift_roll:.1f}°")
+    
+    def _on_disengage_released(self):
+        """Called when disengage button is released - restore drift correction (hold mode only)."""
+        # Only restore if in hold mode (not toggle mode)
+        if not self.disengage_toggle_mode:
+            self._disengage_off()
+    
     def _on_reset(self):
         """Handle reset button click (if needed in future)."""
         if not safe_queue_put(self.control_queue, 'reset', timeout=QUEUE_PUT_TIMEOUT):
@@ -890,7 +998,7 @@ class CalibrationPanelQt(QGroupBox):
                 # Only print during non-initialization to reduce startup spam
                 if not getattr(self, '_initializing', False):
                     print(f"[CalibrationPanel] Sending set_shortcut: {key} ({display_name})")
-                self.input_command_queue.put(('set_shortcut', key, display_name))
+                self.input_command_queue.put(('set_shortcut', key, display_name, 'reset_orientation'))
                 
                 # Only log if not during initialization to prevent startup spam
                 if not getattr(self, '_initializing', False) and self.message_callback:
@@ -903,10 +1011,58 @@ class CalibrationPanelQt(QGroupBox):
         elif self.input_command_queue:
             # Clear any existing shortcut
             try:
-                print("[CalibrationPanel] Sending clear_shortcut")
-                self.input_command_queue.put(('clear_shortcut',))
+                print("[CalibrationPanel] Sending clear_shortcut for reset_orientation")
+                self.input_command_queue.put(('clear_shortcut', 'reset_orientation'))
             except Exception:
                 pass
+    
+    def _set_disengage_shortcut(self, key, display_name):
+        """Set the keyboard or gamepad shortcut for disengage drift correction via input worker."""
+        # Store shortcut info
+        self.disengage_shortcut = key
+        self.disengage_shortcut_display_name = display_name if display_name else key
+        
+        # Update button text to show the shortcut
+        if key and key != 'None':
+            self.disengage_btn.setText(f"Disengage Drift Correction ({display_name})")
+        else:
+            self.disengage_btn.setText("Disengage Drift Correction")
+        
+        # Register shortcut with input worker
+        if self.input_command_queue and key and key != 'None':
+            try:
+                # Only print during non-initialization to reduce startup spam
+                if not getattr(self, '_initializing', False):
+                    print(f"[CalibrationPanel] Sending disengage shortcut: {key} ({display_name})")
+                self.input_command_queue.put(('set_shortcut', key, display_name, 'disengage_drift'))
+                
+                # Only log if not during initialization to prevent startup spam
+                if not getattr(self, '_initializing', False) and self.message_callback:
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda _cb=cb, _d=display_name: _cb(f"Disengage shortcut set to: {_d}"))
+            except Exception as ex:
+                if self.message_callback:
+                    cb = self.message_callback
+                    QTimer.singleShot(0, lambda msg=f"Failed to set disengage shortcut: {ex}", _cb=cb: _cb(msg))
+        elif self.input_command_queue:
+            # Clear any existing shortcut
+            try:
+                print("[CalibrationPanel] Sending clear_shortcut for disengage_drift")
+                self.input_command_queue.put(('clear_shortcut', 'disengage_drift'))
+            except Exception:
+                pass
+    
+    def set_disengage_toggle_mode(self, toggle_mode):
+        """Set the disengage toggle mode.
+        
+        Args:
+            toggle_mode: Boolean - True for toggle mode, False for hold mode
+        """
+        self.disengage_toggle_mode = toggle_mode
+        
+        # If switching to hold mode while toggled on, turn it off
+        if not toggle_mode and self.disengage_toggled_on:
+            self._disengage_off()
     
     def _check_input_responses(self):
         """Check for responses from input worker and handle shortcut triggers."""
@@ -918,12 +1074,35 @@ class CalibrationPanelQt(QGroupBox):
             print(f"[CalibrationPanel] Received input response: {response}")
             if response and len(response) >= 2:
                 response_type = response[0]
+                
+                # Handle old-style shortcut_triggered for backward compatibility
                 if response_type == 'shortcut_triggered' and len(response) >= 3:
                     action = response[2]
                     print(f"[CalibrationPanel] Shortcut triggered, action: {action}")
                     if action == 'reset_orientation':
                         print(f"[CalibrationPanel] Triggering reset orientation")
                         self._on_reset_orientation()
+                
+                # Handle new-style shortcut_pressed events
+                elif response_type == 'shortcut_pressed' and len(response) >= 3:
+                    action = response[2]
+                    print(f"[CalibrationPanel] Shortcut pressed, action: {action}")
+                    if action == 'reset_orientation':
+                        self._on_reset_orientation()
+                    elif action == 'disengage_drift':
+                        print(f"[CalibrationPanel] Triggering disengage drift correction (pressed)")
+                        self._on_disengage_pressed()
+                
+                # Handle new-style shortcut_released events
+                elif response_type == 'shortcut_released' and len(response) >= 3:
+                    action = response[2]
+                    print(f"[CalibrationPanel] Shortcut released, action: {action}")
+                    if action == 'disengage_drift':
+                        # Only handle release in hold mode (not toggle mode)
+                        if not self.disengage_toggle_mode:
+                            print(f"[CalibrationPanel] Triggering disengage drift correction (released)")
+                            self._on_disengage_released()
+                        
         except queue.Empty:
             # No response available, this is normal
             pass
@@ -1093,7 +1272,10 @@ class CalibrationPanelQt(QGroupBox):
                 'drift_angle_pitch': f"{pitch_v:.1f}",
                 'drift_angle_roll': f"{roll_v:.1f}",
                 'reset_shortcut': self.reset_shortcut,
-                'reset_shortcut_display_name': self.reset_shortcut_display_name
+                'reset_shortcut_display_name': self.reset_shortcut_display_name,
+                'disengage_shortcut': self.disengage_shortcut,
+                'disengage_shortcut_display_name': self.disengage_shortcut_display_name,
+                'disengage_toggle_mode': self.disengage_toggle_mode
             }
         except Exception:
             return {
@@ -1101,7 +1283,10 @@ class CalibrationPanelQt(QGroupBox):
                 'drift_angle_pitch': f"{DEFAULT_CENTER_THRESHOLD:.1f}",
                 'drift_angle_roll': f"{DEFAULT_CENTER_THRESHOLD:.1f}",
                 'reset_shortcut': 'None',
-                'reset_shortcut_display_name': 'None'
+                'reset_shortcut_display_name': 'None',
+                'disengage_shortcut': 'None',
+                'disengage_shortcut_display_name': 'None',
+                'disengage_toggle_mode': False
             }
 
     def set_prefs(self, prefs):
@@ -1190,6 +1375,43 @@ class CalibrationPanelQt(QGroupBox):
             # Ensure button shows no shortcut
             if self.reset_button:
                 self.reset_button.setText("Reset Orientation")
+        
+        # Restore disengage drift correction shortcut if saved
+        disengage_shortcut = prefs.get('disengage_shortcut', 'None')
+        if disengage_shortcut and disengage_shortcut != 'None':
+            try:
+                # Try to get saved display name first
+                display_name = prefs.get('disengage_shortcut_display_name', disengage_shortcut)
+                
+                # If no saved display name, generate one
+                if display_name == disengage_shortcut or not display_name:
+                    if disengage_shortcut.startswith('KP_'):
+                        numpad_map = {
+                            'KP_0': 'Numpad 0', 'KP_1': 'Numpad 1', 'KP_2': 'Numpad 2',
+                            'KP_3': 'Numpad 3', 'KP_4': 'Numpad 4', 'KP_5': 'Numpad 5',
+                            'KP_6': 'Numpad 6', 'KP_7': 'Numpad 7', 'KP_8': 'Numpad 8',
+                            'KP_9': 'Numpad 9', 'KP_Decimal': 'Numpad .', 'KP_Divide': 'Numpad /',
+                            'KP_Multiply': 'Numpad *', 'KP_Subtract': 'Numpad -', 'KP_Add': 'Numpad +',
+                            'KP_Enter': 'Numpad Enter'
+                        }
+                        display_name = numpad_map.get(disengage_shortcut, disengage_shortcut)
+                    elif disengage_shortcut.startswith('joy'):
+                        display_name = f"Gamepad ({disengage_shortcut})"
+                    else:
+                        display_name = disengage_shortcut.upper()
+                
+                self._set_disengage_shortcut(disengage_shortcut, display_name)
+            except Exception:
+                pass
+        else:
+            # Ensure button shows no shortcut
+            if self.disengage_btn:
+                self.disengage_btn.setText("Disengage Drift Correction")
+        
+        # Load disengage toggle mode
+        self.disengage_toggle_mode = prefs.get('disengage_toggle_mode', False)
+        if isinstance(self.disengage_toggle_mode, str):
+            self.disengage_toggle_mode = self.disengage_toggle_mode.lower() in ('true', '1', 'yes')
         
         # Clear initialization flag
         self._initializing = False

@@ -86,6 +86,11 @@ QLineEdit:disabled {
     color: #aaaaaa;
 }
 
+/* Checkboxes */
+QCheckBox {
+    color: #000000;
+}
+
 /* Sliders */
 QSlider::groove:horizontal {
     border: 1px solid #999999;

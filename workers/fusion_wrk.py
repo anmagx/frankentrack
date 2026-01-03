@@ -663,6 +663,21 @@ def run_worker(serialQueue, translationQueue, eulerQueue, eulerDisplayQueue, con
                             log_warning(logQueue, "Fusion Worker", f"Invalid center threshold: {new_val}")
                     except Exception as e:
                         log_warning(logQueue, "Fusion Worker", f"Error setting center threshold: {e}")
+                elif isinstance(cmd, (list, tuple)) and len(cmd) >= 4 and cmd[0] == 'set_threshold':
+                    # Set all three thresholds at once: ('set_threshold', yaw, pitch, roll)
+                    try:
+                        yaw_val = float(cmd[1])
+                        pitch_val = float(cmd[2])
+                        roll_val = float(cmd[3])
+                        if 0.0 <= yaw_val <= 180.0 and 0.0 <= pitch_val <= 180.0 and 0.0 <= roll_val <= 180.0:
+                            filter.center_threshold_yaw = yaw_val
+                            filter.center_threshold_pitch = pitch_val
+                            filter.center_threshold_roll = roll_val
+                            log_info(logQueue, "Fusion Worker", f"Center thresholds updated to Yaw={yaw_val}, Pitch={pitch_val}, Roll={roll_val}")
+                        else:
+                            log_warning(logQueue, "Fusion Worker", f"Invalid center thresholds: Yaw={yaw_val}, Pitch={pitch_val}, Roll={roll_val}")
+                    except Exception as e:
+                        log_warning(logQueue, "Fusion Worker", f"Error setting center thresholds: {e}")
                 elif isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[0] == 'set_center_threshold_yaw':
                     try:
                         new_val = float(cmd[1])

@@ -124,9 +124,11 @@ class InputWorker:
         # Pygame management
         self.pygame_manager = PygameManager()
         
-        # Current shortcut being monitored for triggering
-        self.current_shortcut = None
-        self.current_shortcut_display = None
+        # Shortcuts being monitored: {action: (key, display_name)}
+        self.shortcuts = {}
+        
+        # Track key/button states for press/release detection: {key: pressed}
+        self._key_states = {}
         
         # Listener control - start/stop on demand
         self.keyboard_listener_active = False
@@ -205,13 +207,20 @@ class InputWorker:
         cmd_type = command[0]
         
         if cmd_type == 'set_shortcut':
-            # Set the shortcut to monitor: ('set_shortcut', key, display_name)
-            if len(command) >= 3:
-                self._set_shortcut(command[1], command[2])
+            # Set the shortcut to monitor: ('set_shortcut', key, display_name, action)
+            if len(command) >= 4:
+                self._set_shortcut(command[1], command[2], command[3])
+            elif len(command) >= 3:
+                # Backward compatibility: assume 'reset_orientation' if no action specified
+                self._set_shortcut(command[1], command[2], 'reset_orientation')
                 
         elif cmd_type == 'clear_shortcut':
-            # Clear any active shortcut monitoring
-            self._clear_shortcut()
+            # Clear a specific shortcut: ('clear_shortcut', action)
+            if len(command) >= 2:
+                self._clear_shortcut(command[1])
+            else:
+                # Clear all shortcuts if no action specified (backward compatibility)
+                self._clear_all_shortcuts()
             
         elif cmd_type == 'start_capture':
             # Start input capture mode: ('start_capture',)
@@ -225,34 +234,43 @@ class InputWorker:
             # Manually trigger reset (for testing): ('trigger_reset',)
             self._send_response(('shortcut_triggered', 'manual_trigger', 'reset_orientation'))
     
-    def _set_shortcut(self, key, display_name):
-        """Set the shortcut to monitor for reset operations."""
-        # Stop any existing listeners
-        self._stop_keyboard_listener()
-        self._stop_gamepad_listener()
-        
-        self.current_shortcut = key
-        self.current_shortcut_display = display_name
-        
+    def _set_shortcut(self, key, display_name, action):
+        """Set the shortcut to monitor for a specific action."""
         if not key or key == 'None':
-            print(f"[InputWorker] Shortcut cleared")
+            # Clear this shortcut if key is None
+            self._clear_shortcut(action)
             return
+        
+        self.shortcuts[action] = (key, display_name)
+        print(f"[InputWorker] Shortcut set for '{action}': {key} ({display_name})")
         
         # Start appropriate listener based on key type
         if key.startswith('joy'):
             # Gamepad shortcut
-            self._start_gamepad_listener()
+            if not self.gamepad_listener_active:
+                self._start_gamepad_listener()
         else:
             # Keyboard shortcut
-            self._start_keyboard_listener()
+            if not self.keyboard_listener_active:
+                self._start_keyboard_listener()
     
-    def _clear_shortcut(self):
-        """Clear the current shortcut and stop listeners."""
+    def _clear_shortcut(self, action):
+        """Clear a specific shortcut."""
+        if action in self.shortcuts:
+            del self.shortcuts[action]
+            print(f"[InputWorker] Shortcut cleared for '{action}'")
+        
+        # Stop listeners if no shortcuts remain
+        if not self.shortcuts:
+            self._stop_keyboard_listener()
+            self._stop_gamepad_listener()
+    
+    def _clear_all_shortcuts(self):
+        """Clear all shortcuts and stop listeners."""
         self._stop_keyboard_listener()
         self._stop_gamepad_listener()
-        self.current_shortcut = None
-        self.current_shortcut_display = None
-        print("[InputWorker] Shortcut cleared, listeners stopped")
+        self.shortcuts = {}
+        print("[InputWorker] All shortcuts cleared, listeners stopped")
     
     def _start_capture(self):
         """Start input capture mode - both listeners active temporarily."""
@@ -327,22 +345,32 @@ class InputWorker:
             if not self.keyboard_listener_active:
                 return
                 
-            if not event.event_type == 'down':  # Only respond to key down events
-                return
-                
             key_name = event.name
             
-            # In capture mode, report the key
+            # In capture mode, report the key (only on down)
             if self.capture_mode:
-                display_name = key_name.upper() if len(key_name) == 1 else key_name.title()
-                print(f"[InputWorker] Keyboard captured: {key_name} (display: {display_name})")
-                self._send_response(('input_captured', key_name, display_name))
+                if event.event_type == 'down':
+                    display_name = key_name.upper() if len(key_name) == 1 else key_name.title()
+                    print(f"[InputWorker] Keyboard captured: {key_name} (display: {display_name})")
+                    self._send_response(('input_captured', key_name, display_name))
                 return
             
-            # In monitoring mode, check if it matches current shortcut
-            if self.current_shortcut and self.current_shortcut == key_name:
-                print(f"[InputWorker] Keyboard shortcut triggered: {self.current_shortcut}")
-                self._send_response(('shortcut_triggered', self.current_shortcut, 'reset_orientation'))
+            # In monitoring mode, check if it matches any shortcut
+            for action, (shortcut_key, display_name) in self.shortcuts.items():
+                if shortcut_key == key_name:
+                    if event.event_type == 'down':
+                        # Track state for this key
+                        if not self._key_states.get(key_name, False):
+                            self._key_states[key_name] = True
+                            print(f"[InputWorker] Keyboard shortcut pressed: {key_name} -> {action}")
+                            self._send_response(('shortcut_pressed', shortcut_key, action))
+                    elif event.event_type == 'up':
+                        # Release event
+                        if self._key_states.get(key_name, False):
+                            self._key_states[key_name] = False
+                            print(f"[InputWorker] Keyboard shortcut released: {key_name} -> {action}")
+                            self._send_response(('shortcut_released', shortcut_key, action))
+                    break
         
         try:
             # Hook all keyboard events
@@ -428,26 +456,32 @@ class InputWorker:
                                     pressed = bool(joystick.get_button(button_id))
                                     btn_key = (i, 'b', button_id)
                                     last_state = self._last_button_states.get(btn_key, False)
+                                    key_id = f"joy{i}_button{button_id}"
                                     
-                                    # Button press detected (transition from False to True)
-                                    if pressed and not last_state:
-                                        key_id = f"joy{i}_button{button_id}"
+                                    # In capture mode, report the button (only on press)
+                                    if self.capture_mode and pressed and not last_state:
+                                        try:
+                                            joy_name = joystick.get_name()
+                                            display_name = f"{joy_name} Button {button_id}"
+                                        except Exception:
+                                            display_name = f"Joystick {i} Button {button_id}"
                                         
-                                        # In capture mode, report the button
-                                        if self.capture_mode:
-                                            try:
-                                                joy_name = joystick.get_name()
-                                                display_name = f"{joy_name} Button {button_id}"
-                                            except Exception:
-                                                display_name = f"Joystick {i} Button {button_id}"
-                                            
-                                            print(f"[InputWorker] Gamepad captured: {key_id} (display: {display_name})")
-                                            self._send_response(('input_captured', key_id, display_name))
-                                        
-                                        # In monitoring mode, check if it matches current shortcut
-                                        elif self.current_shortcut == key_id:
-                                            print(f"[InputWorker] Gamepad shortcut triggered: {key_id}")
-                                            self._send_response(('shortcut_triggered', key_id, 'reset_orientation'))
+                                        print(f"[InputWorker] Gamepad captured: {key_id} (display: {display_name})")
+                                        self._send_response(('input_captured', key_id, display_name))
+                                    
+                                    # In monitoring mode, check if it matches any shortcut
+                                    elif not self.capture_mode:
+                                        for action, (shortcut_key, display_name) in self.shortcuts.items():
+                                            if shortcut_key == key_id:
+                                                # Button press detected (transition from False to True)
+                                                if pressed and not last_state:
+                                                    print(f"[InputWorker] Gamepad shortcut pressed: {key_id} -> {action}")
+                                                    self._send_response(('shortcut_pressed', key_id, action))
+                                                # Button release detected (transition from True to False)
+                                                elif not pressed and last_state:
+                                                    print(f"[InputWorker] Gamepad shortcut released: {key_id} -> {action}")
+                                                    self._send_response(('shortcut_released', key_id, action))
+                                                break
                                     
                                     self._last_button_states[btn_key] = pressed
                                     
@@ -481,10 +515,23 @@ class InputWorker:
                                             print(f"[InputWorker] Gamepad captured: {key_id} (display: {display_name})")
                                             self._send_response(('input_captured', key_id, display_name))
                                         
-                                        # In monitoring mode, check if it matches current shortcut
-                                        elif self.current_shortcut == key_id:
-                                            print(f"[InputWorker] Gamepad shortcut triggered: {key_id}")
-                                            self._send_response(('shortcut_triggered', key_id, 'reset_orientation'))
+                                        # In monitoring mode, check if it matches any shortcut
+                                        else:
+                                            for action, (shortcut_key, display_name) in self.shortcuts.items():
+                                                if shortcut_key == key_id:
+                                                    print(f"[InputWorker] Gamepad shortcut pressed: {key_id} -> {action}")
+                                                    self._send_response(('shortcut_pressed', key_id, action))
+                                                    break
+                                    
+                                    # Hat released (returned to center)
+                                    elif hat_value == (0, 0) and last_hat != (0, 0):
+                                        # Check if the previous hat position was a shortcut
+                                        prev_key_id = f"joy{i}_hat{hat_id}_{last_hat[0]}_{last_hat[1]}"
+                                        for action, (shortcut_key, display_name) in self.shortcuts.items():
+                                            if shortcut_key == prev_key_id:
+                                                print(f"[InputWorker] Gamepad shortcut released: {prev_key_id} -> {action}")
+                                                self._send_response(('shortcut_released', prev_key_id, action))
+                                                break
                                     
                                     self._last_hat_states[hat_key] = hat_value
                                     

@@ -1,4 +1,5 @@
 import sys
+import argparse
 from workers.process_man import ProcessHandler
 
 # Require Python 3.8 or higher
@@ -20,7 +21,13 @@ if sys.version_info >= (3, 14):
         sys.exit(0)
 
 def main():
-    handler = ProcessHandler()
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='frankentrack - Head tracking system')
+    parser.add_argument('--diagnostics', action='store_true', 
+                       help='Enable diagnostics tab (developer mode)')
+    args = parser.parse_args()
+    
+    handler = ProcessHandler(enable_diagnostics=args.diagnostics)
     handler.start_workers()
     try:
         # Main loop: exit and stop workers when the shared stop_event is set

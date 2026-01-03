@@ -58,7 +58,7 @@ class TabbedGUIWorker(QMainWindow):
                  serial_display_queue=None, euler_display_queue=None,
                  camera_control_queue=None, translation_display_queue=None, camera_preview_queue=None,
                  log_queue=None, stop_event=None, on_stop_callback=None,
-                 input_command_queue=None, input_response_queue=None):
+                 input_command_queue=None, input_response_queue=None, enable_diagnostics=False):
         """
         Initialize the tabbed GUI worker.
         
@@ -100,6 +100,9 @@ class TabbedGUIWorker(QMainWindow):
         # Input worker queues
         self.input_command_queue = input_command_queue
         self.input_response_queue = input_response_queue
+        
+        # Diagnostics mode flag (developer feature)
+        self.enable_diagnostics = enable_diagnostics
         
         # Initialize managers
         self.preferences_manager = PreferencesManager()
@@ -149,7 +152,11 @@ class TabbedGUIWorker(QMainWindow):
         # Create tabs (Camera tab placed between Orientation and Diagnostics)
         self.create_orientation_tab()
         self.create_camera_tab()
-        self.create_diagnostics_tab()
+        
+        # Diagnostics tab only shown in developer mode
+        if self.enable_diagnostics:
+            self.create_diagnostics_tab()
+        
         self.create_messages_tab()
         self.create_preferences_tab()
         self.create_about_tab()
@@ -329,7 +336,7 @@ class TabbedGUIWorker(QMainWindow):
     def _on_tab_changed(self, index):
         """Handle tab changes to optimize performance by skipping diagnostics updates when not visible."""
         # Log tab changes for debugging (diagnostics updates are now visibility-checked)
-        if hasattr(self, 'diagnostics_tab_index'):
+        if self.enable_diagnostics and hasattr(self, 'diagnostics_tab_index'):
             if index == self.diagnostics_tab_index:
                 print("[GUI] Diagnostics tab selected - matplotlib updates enabled")
             else:
@@ -548,8 +555,9 @@ class TabbedGUIWorker(QMainWindow):
         if hasattr(self.orientation_panel, 'update_euler'):
             self.orientation_panel.update_euler(yaw, pitch, roll)
         
-        # Update diagnostics panel with orientation data (only if tab is active)
-        if (hasattr(self, 'diagnostics_tab_index') and 
+        # Update diagnostics panel with orientation data (only if enabled and tab is active)
+        if (self.enable_diagnostics and hasattr(self, 'diagnostics_panel') and
+            hasattr(self, 'diagnostics_tab_index') and 
             self.tab_widget.currentIndex() == self.diagnostics_tab_index and
             hasattr(self.diagnostics_panel, 'update_euler')):
             self.diagnostics_panel.update_euler(yaw, pitch, roll)
@@ -693,48 +701,6 @@ class TabbedGUIWorker(QMainWindow):
             # Silently handle display queue errors to avoid spam
             pass
     
-    def _handle_status_update(self, status_type: str, value):
-        """Handle status updates from workers."""
-        try:
-            if status_type == 'gyro_calibrated' and hasattr(self.calibration_panel, 'update_calibration_status'):
-                self.calibration_panel.update_calibration_status(bool(value))
-            elif status_type == 'gyro_calibrating' and hasattr(self.calibration_panel, 'update_calibrating_status'):
-                self.calibration_panel.update_calibrating_status(bool(value))
-                
-                # Control hold panel blinking during gyro calibration
-                if hasattr(self.hold_panel, 'start_blinking') and bool(value):
-                    self.hold_panel.start_blinking()  # Start blinking when calibration starts
-                elif hasattr(self.hold_panel, 'stop_blinking') and not bool(value):
-                    self.hold_panel.stop_blinking()  # Stop blinking when calibration finishes
-            elif status_type == 'processing' and hasattr(self.calibration_panel, 'update_processing_status'):
-                self.calibration_panel.update_processing_status(str(value))
-            elif status_type == 'drift_correction' and hasattr(self.orientation_panel, 'update_drift_status'):
-                self.orientation_panel.update_drift_status(bool(value))
-            elif status_type == 'msg_rate' and hasattr(self.status_bar, 'update_message_rate'):
-                self.status_bar.update_message_rate(float(value))
-            elif status_type == 'send_rate' and hasattr(self.status_bar, 'update_send_rate'):
-                self.status_bar.update_send_rate(float(value))
-            elif status_type == 'cam_fps' and hasattr(self.status_bar, 'update_camera_fps'):
-                try:
-                    self.status_bar.update_camera_fps(float(value))
-                except Exception:
-                    pass
-            elif status_type == 'stationary' and hasattr(self.status_bar, 'update_device_status'):
-                self.status_bar.update_device_status(bool(value))
-            elif status_type == 'serial_connection' and hasattr(self.serial_panel, 'update_connection_status'):
-                self.serial_panel.update_connection_status(str(value))
-            elif status_type == 'serial_data' and hasattr(self.serial_panel, 'update_data_activity'):
-                self.serial_panel.update_data_activity()
-            elif status_type == 'filter_type':
-                # Filter type change acknowledgment from fusion worker
-                if hasattr(self.orientation_panel, 'filter_combo'):
-                    try:
-                        self.orientation_panel.filter_combo.setCurrentText(str(value))
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"[GUI] Error handling status update {status_type}: {e}")
-    
     def _log_message(self, message: str):
         """Log a message to the message panel."""
         if hasattr(self.message_panel, 'append_message'):
@@ -803,7 +769,7 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.calibration_panel, 'set_prefs') and 'calibration' in prefs:
                 self.calibration_panel.set_prefs(prefs['calibration'])
             
-            if hasattr(self.diagnostics_panel, 'set_prefs') and 'diagnostics' in prefs:
+            if hasattr(self, 'diagnostics_panel') and hasattr(self.diagnostics_panel, 'set_prefs') and 'diagnostics' in prefs:
                 self.diagnostics_panel.set_prefs(prefs['diagnostics'])
 
             # Camera panel preferences (if present)
@@ -926,7 +892,7 @@ class TabbedGUIWorker(QMainWindow):
             if hasattr(self.calibration_panel, 'get_prefs'):
                 prefs['calibration'] = self.calibration_panel.get_prefs()
             
-            if hasattr(self.diagnostics_panel, 'get_prefs'):
+            if hasattr(self, 'diagnostics_panel') and hasattr(self.diagnostics_panel, 'get_prefs'):
                 prefs['diagnostics'] = self.diagnostics_panel.get_prefs()
             
             # Camera panel preferences
@@ -971,7 +937,7 @@ def start_gui_worker(serial_control_queue, fusion_control_queue,
                      serial_display_queue=None, euler_display_queue=None,
                      camera_control_queue=None, translation_display_queue=None, camera_preview_queue=None,
                  log_queue=None, stop_event=None, on_stop_callback=None,
-                 input_command_queue=None, input_response_queue=None):
+                 input_command_queue=None, input_response_queue=None, enable_diagnostics=False):
     """
     Start the PyQt5 GUI worker with tabbed interface.
     
@@ -1040,7 +1006,8 @@ def start_gui_worker(serial_control_queue, fusion_control_queue,
         stop_event=stop_event,
         on_stop_callback=on_stop_callback,
         input_command_queue=input_command_queue,
-        input_response_queue=input_response_queue
+        input_response_queue=input_response_queue,
+        enable_diagnostics=enable_diagnostics
     )
     
     # Show window
@@ -1056,7 +1023,7 @@ def start_gui_worker(serial_control_queue, fusion_control_queue,
 
 def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event, 
                eulerDisplayQueue, controlQueue, serialControlQueue, 
-               udpControlQueue, logQueue, uiStatusQueue, cameraControlQueue, translationDisplayQueue, cameraPreviewQueue, inputCommandQueue, inputResponseQueue):
+               udpControlQueue, logQueue, uiStatusQueue, cameraControlQueue, translationDisplayQueue, cameraPreviewQueue, inputCommandQueue, inputResponseQueue, enable_diagnostics=False):
     """
     Compatibility wrapper for the process manager.
     
@@ -1080,6 +1047,7 @@ def run_worker(messageQueue, serialDisplayQueue, statusQueue, stop_event,
         stop_event=stop_event,
         input_command_queue=inputCommandQueue,
         input_response_queue=inputResponseQueue,
+        enable_diagnostics=enable_diagnostics,
         on_stop_callback=lambda: stop_event.set()
     )
 

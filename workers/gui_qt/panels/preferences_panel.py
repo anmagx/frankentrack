@@ -43,6 +43,9 @@ class PreferencesPanel(QWidget):
         self.prefs_manager = preferences_manager or PreferencesManager()
         self.reset_shortcut = "None"
         self.reset_shortcut_display_name = "None"
+        self.disengage_shortcut = "None"
+        self.disengage_shortcut_display_name = "None"
+        self.disengage_toggle_mode = False  # False = hold to disengage, True = toggle on/off
         self.calibration_panel = None  # Will be set by parent
         
         # Store input worker queues
@@ -170,6 +173,25 @@ class PreferencesPanel(QWidget):
         reset_layout.addStretch()
         
         shortcuts_layout.addLayout(reset_layout)
+        
+        # Disengage drift correction shortcut
+        disengage_layout = QHBoxLayout()
+        disengage_layout.addWidget(QLabel("Disengage Drift Correction:"))
+        
+        self.disengage_shortcut_button = QPushButton("Set Shortcut...")
+        self.disengage_shortcut_button.clicked.connect(self._on_set_disengage_shortcut)
+        disengage_layout.addWidget(self.disengage_shortcut_button)
+        disengage_layout.addStretch()
+        
+        shortcuts_layout.addLayout(disengage_layout)
+        
+        # Toggle mode checkbox for disengage
+        from PyQt5.QtWidgets import QCheckBox
+        self.disengage_toggle_checkbox = QCheckBox("Toggle mode (press once to disengage, press again to re-engage)")
+        self.disengage_toggle_checkbox.setChecked(self.disengage_toggle_mode)
+        self.disengage_toggle_checkbox.stateChanged.connect(self._on_disengage_toggle_changed)
+        shortcuts_layout.addWidget(self.disengage_toggle_checkbox)
+        
         shortcuts_group.setLayout(shortcuts_layout)
         layout.addWidget(shortcuts_group)
         
@@ -963,6 +985,81 @@ class PreferencesPanel(QWidget):
                     except Exception as e:
                         print(f"[Preferences] Error restoring shortcut: {e}")
     
+    def _on_set_disengage_shortcut(self):
+        """Open dialog to capture a keyboard shortcut for disengage drift correction."""
+        # Temporarily clear any existing shortcut monitoring to free up joysticks
+        if self.input_command_queue:
+            try:
+                self.input_command_queue.put(('clear_shortcut', 'disengage_drift'), timeout=0.1)
+                print("[Preferences] Cleared existing disengage shortcut for capture")
+            except Exception as e:
+                print(f"[Preferences] Error clearing disengage shortcut: {e}")
+        
+        dialog = KeyCaptureDialog(
+            self.window(), 
+            self.disengage_shortcut,
+            self.input_command_queue,
+            self.input_response_queue
+        )
+        
+        if dialog.exec_() == QDialog.Accepted and dialog.captured_key:
+            key = dialog.captured_key
+            display_name = dialog.display_name or dialog.captured_key
+            
+            # Store shortcut and display name
+            self.disengage_shortcut = key
+            self.disengage_shortcut_display_name = display_name
+            print(f"[Preferences] Captured disengage shortcut: key={key}, display_name={display_name}")
+            
+            # Update button text
+            if key and key != 'None':
+                self.disengage_shortcut_button.setText(f"Shortcut: {display_name}")
+            else:
+                self.disengage_shortcut_button.setText("Set Shortcut...")
+            
+            # Stop capture mode and immediately activate the new shortcut
+            if self.input_command_queue:
+                try:
+                    # First stop capture mode (stops both temporary listeners)
+                    self.input_command_queue.put(('stop_capture',), timeout=0.1)
+                    print(f"[Preferences] Stopped capture mode")
+                    # Then set the shortcut with action 'disengage_drift'
+                    self.input_command_queue.put(('set_shortcut', key, display_name, 'disengage_drift'), timeout=0.1)
+                    print(f"[Preferences] Sent disengage shortcut to input worker: {key}")
+                except Exception as e:
+                    print(f"[Preferences] Error sending disengage shortcut to input worker: {e}")
+            
+            # Update calibration panel to set the disengage shortcut
+            if self.calibration_panel:
+                self.calibration_panel._set_disengage_shortcut(key, display_name)
+            
+            # Save to preferences immediately (only if not loading)
+            if not getattr(self, '_loading', False):
+                self.preferences_changed.emit()
+            print(f"[Preferences] Disengage shortcut saved to preferences and activated")
+        else:
+            # Dialog was cancelled - restore the previous shortcut monitoring
+            if self.disengage_shortcut and self.disengage_shortcut != 'None':
+                if self.input_command_queue:
+                    try:
+                        display_name = self.disengage_shortcut_display_name if self.disengage_shortcut_display_name != 'None' else self.disengage_shortcut
+                        self.input_command_queue.put(('set_shortcut', self.disengage_shortcut, display_name, 'disengage_drift'), timeout=0.1)
+                        print(f"[Preferences] Restored disengage shortcut monitoring: {self.disengage_shortcut}")
+                    except Exception as e:
+                        print(f"[Preferences] Error restoring disengage shortcut: {e}")
+    
+    def _on_disengage_toggle_changed(self, state):
+        """Handle disengage toggle mode checkbox change."""
+        self.disengage_toggle_mode = (state == 2)  # Qt.Checked == 2
+        
+        # Update calibration panel with new toggle mode
+        if self.calibration_panel:
+            self.calibration_panel.set_disengage_toggle_mode(self.disengage_toggle_mode)
+        
+        # Save preference
+        if not getattr(self, '_loading', False):
+            self.preferences_changed.emit()
+    
     def load_shortcut_preferences(self, prefs):
         """Load shortcut preferences from saved config."""
         shortcut = prefs.get('reset_shortcut', 'None')
@@ -1075,6 +1172,7 @@ class PreferencesPanel(QWidget):
     
     def _load_shortcut_settings(self, cal_prefs):
         """Load keyboard shortcut settings."""
+        # Load reset orientation shortcut
         shortcut = cal_prefs.get('reset_shortcut', 'None')
         if shortcut and shortcut != 'None':
             try:
@@ -1126,6 +1224,57 @@ class PreferencesPanel(QWidget):
                 if not getattr(self.calibration_panel, '_initializing', False):
                     cal = self.calibration_panel
                     QTimer.singleShot(0, lambda _cal=cal: self._safe_set_reset_shortcut(_cal, "None", "None"))
+        
+        # Load disengage drift correction shortcut
+        disengage_shortcut = cal_prefs.get('disengage_shortcut', 'None')
+        if disengage_shortcut and disengage_shortcut != 'None':
+            try:
+                # Try to get saved display name first
+                display_name = cal_prefs.get('disengage_shortcut_display_name', disengage_shortcut)
+                
+                # If no saved display name, generate one
+                if display_name == disengage_shortcut or not display_name:
+                    if disengage_shortcut.startswith('KP_'):
+                        numpad_map = {
+                            'KP_0': 'Numpad 0', 'KP_1': 'Numpad 1', 'KP_2': 'Numpad 2',
+                            'KP_3': 'Numpad 3', 'KP_4': 'Numpad 4', 'KP_5': 'Numpad 5',
+                            'KP_6': 'Numpad 6', 'KP_7': 'Numpad 7', 'KP_8': 'Numpad 8',
+                            'KP_9': 'Numpad 9', 'KP_Decimal': 'Numpad .', 'KP_Divide': 'Numpad /',
+                            'KP_Multiply': 'Numpad *', 'KP_Subtract': 'Numpad -', 'KP_Add': 'Numpad +',
+                            'KP_Enter': 'Numpad Enter'
+                        }
+                        display_name = numpad_map.get(disengage_shortcut, disengage_shortcut)
+                    elif disengage_shortcut.startswith('joy'):
+                        display_name = f"Gamepad ({disengage_shortcut})"
+                    else:
+                        display_name = disengage_shortcut.upper()
+                
+                self.disengage_shortcut = disengage_shortcut
+                self.disengage_shortcut_display_name = display_name
+                self.disengage_shortcut_button.setText(f"Shortcut: {display_name}")
+                
+                # Apply to calibration panel to register the hotkey
+                if self.calibration_panel:
+                    from PyQt5.QtCore import QTimer
+                    if not getattr(self.calibration_panel, '_initializing', False):
+                        cal = self.calibration_panel
+                        QTimer.singleShot(0, lambda _cal=cal, _s=disengage_shortcut, _d=display_name: _cal._set_disengage_shortcut(_s, _d))
+            except Exception:
+                pass
+        else:
+            self.disengage_shortcut = "None"
+            self.disengage_shortcut_display_name = "None"
+            self.disengage_shortcut_button.setText("Set Shortcut...")
+        
+        # Load disengage toggle mode
+        self.disengage_toggle_mode = cal_prefs.get('disengage_toggle_mode', False)
+        if isinstance(self.disengage_toggle_mode, str):
+            self.disengage_toggle_mode = self.disengage_toggle_mode.lower() in ('true', '1', 'yes')
+        self.disengage_toggle_checkbox.setChecked(self.disengage_toggle_mode)
+        
+        # Update calibration panel with toggle mode
+        if self.calibration_panel:
+            self.calibration_panel.set_disengage_toggle_mode(self.disengage_toggle_mode)
     
     def _load_sensor_settings(self, cal_prefs):
         """Load sensor configuration settings from preferences."""
@@ -1206,6 +1355,9 @@ class PreferencesPanel(QWidget):
         return {
             'reset_shortcut': self.reset_shortcut,
             'reset_shortcut_display_name': self.reset_shortcut_display_name,
+            'disengage_shortcut': self.disengage_shortcut,
+            'disengage_shortcut_display_name': self.disengage_shortcut_display_name,
+            'disengage_toggle_mode': self.disengage_toggle_mode,
             'alpha_pitch': f"{self.alpha_pitch:.3f}",
             'alpha_roll': f"{self.alpha_roll:.3f}",
             'stationary_gyro_threshold': f"{self.stationary_gyro_threshold:.1f}",

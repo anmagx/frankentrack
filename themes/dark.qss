@@ -79,6 +79,11 @@ QSlider::handle:horizontal {
     border-radius: 3px;
 }
 
+/* Checkboxes */
+QCheckBox {
+    color: #ffffff;
+}
+
 /* Combo boxes */
 QComboBox {
     border: 1px solid #666666;
