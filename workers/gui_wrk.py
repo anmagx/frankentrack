@@ -594,7 +594,42 @@ class TabbedGUIWorker(QMainWindow):
             # Update serial panel with data activity
             if hasattr(self.serial_panel, 'update_data_activity') and value:
                 self.serial_panel.update_data_activity()
-        # Add other status types as needed
+        elif status_type == 'gyro_calibrated':
+            if hasattr(self.calibration_panel, 'update_calibration_status'):
+                self.calibration_panel.update_calibration_status(bool(value))
+        elif status_type == 'gyro_calibrating':
+            if hasattr(self.calibration_panel, 'update_calibrating_status'):
+                self.calibration_panel.update_calibrating_status(bool(value))
+            # Control hold panel blinking during gyro calibration
+            if hasattr(self.hold_panel, 'start_blinking') and bool(value):
+                self.hold_panel.start_blinking()
+            elif hasattr(self.hold_panel, 'stop_blinking') and not bool(value):
+                self.hold_panel.stop_blinking()
+        elif status_type == 'drift_correction':
+            if hasattr(self.orientation_panel, 'update_drift_status'):
+                self.orientation_panel.update_drift_status(bool(value))
+        elif status_type == 'msg_rate':
+            if hasattr(self.status_bar, 'update_message_rate'):
+                self.status_bar.update_message_rate(float(value))
+        elif status_type == 'send_rate':
+            if hasattr(self.status_bar, 'update_send_rate'):
+                self.status_bar.update_send_rate(float(value))
+        elif status_type == 'cam_fps':
+            if hasattr(self.status_bar, 'update_camera_fps'):
+                try:
+                    self.status_bar.update_camera_fps(float(value))
+                except Exception:
+                    pass
+        elif status_type == 'stationary':
+            if hasattr(self.status_bar, 'update_device_status'):
+                self.status_bar.update_device_status(bool(value))
+        elif status_type == 'filter_type':
+            # Filter type change acknowledgment from fusion worker
+            if hasattr(self.orientation_panel, 'filter_combo'):
+                try:
+                    self.orientation_panel.filter_combo.setCurrentText(str(value))
+                except Exception:
+                    pass
     
     def _handle_ui_status_update(self, status_type: str, value):
         """Handle UI-specific status updates from workers."""

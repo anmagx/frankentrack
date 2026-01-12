@@ -27,6 +27,7 @@ def main():
                        help='Enable diagnostics tab (developer mode)')
     args = parser.parse_args()
     
+    
     handler = ProcessHandler(enable_diagnostics=args.diagnostics)
     handler.start_workers()
     try:
